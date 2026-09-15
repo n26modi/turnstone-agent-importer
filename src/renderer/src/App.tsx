@@ -1,13 +1,28 @@
 import { useEffect, useState } from 'react'
 import type {
+  AgentSuggestion,
   AnalysisProgress,
   AnalysisResult,
+  CreationPlan,
+  GeneratedOutputManifest,
   ImportResult,
   SetupStyle,
 } from '../../shared/schemas'
 import templeImage from './assets/temple.png'
 
-type ScreenState = 'ready' | 'scanning' | 'found' | 'setup' | 'analyzing' | 'suggestions' | 'error'
+type ScreenState =
+  | 'ready'
+  | 'scanning'
+  | 'found'
+  | 'setup'
+  | 'analyzing'
+  | 'suggestions'
+  | 'confirming'
+  | 'creating'
+  | 'complete'
+  | 'error'
+
+type DrawerState = { type: 'evidence' | 'brain'; agent: AgentSuggestion } | null
 
 const sourceName = {
   'claude-code': 'Claude Code',
@@ -30,12 +45,125 @@ function sourceSummary(source: ImportResult['sources'][number]): string {
   return 'Could not read this source'
 }
 
+function renameAgent(agent: AgentSuggestion, name: string): AgentSuggestion {
+  const trimmed = name.trim()
+  if (!trimmed || trimmed === agent.name) return agent
+  return {
+    ...agent,
+    name: trimmed,
+    brainFiles: agent.brainFiles.map((file) =>
+      file.name === 'README.md'
+        ? { ...file, content: file.content.replace(/^# .+$/m, `# ${trimmed}`) }
+        : file,
+    ),
+  }
+}
+
+function MarkdownPreview({ content }: { content: string }): React.JSX.Element {
+  return (
+    <div className="markdown-preview">
+      {content.split('\n').map((line, index) => {
+        const key = `${index}-${line.slice(0, 12)}`
+        if (line.startsWith('### ')) return <h4 key={key}>{line.slice(4)}</h4>
+        if (line.startsWith('## ')) return <h3 key={key}>{line.slice(3)}</h3>
+        if (line.startsWith('# ')) return <h2 key={key}>{line.slice(2)}</h2>
+        if (line.startsWith('- '))
+          return (
+            <p className="markdown-list" key={key}>
+              {line.slice(2)}
+            </p>
+          )
+        if (!line.trim()) return <span className="markdown-space" key={key} />
+        return <p key={key}>{line}</p>
+      })}
+    </div>
+  )
+}
+
+function ReviewDrawer({
+  drawer,
+  onClose,
+}: {
+  drawer: DrawerState
+  onClose: () => void
+}): React.JSX.Element | null {
+  const [activeFile, setActiveFile] = useState('README.md')
+  if (!drawer) return null
+  const selectedFile =
+    drawer.agent.brainFiles.find((file) => file.name === activeFile) ?? drawer.agent.brainFiles[0]
+
+  return (
+    <div className="drawer-layer" role="presentation">
+      <button className="drawer-scrim" aria-label="Close inspector" onClick={onClose} />
+      <aside
+        className="drawer"
+        aria-label={drawer.type === 'evidence' ? 'Agent evidence' : 'Brain preview'}
+      >
+        <div className="drawer-header">
+          <div>
+            <p className="kicker">
+              {drawer.type === 'evidence' ? 'SOURCE EVIDENCE' : 'BRAIN PREVIEW'}
+            </p>
+            <h2>{drawer.agent.name}</h2>
+          </div>
+          <button className="icon-button" aria-label="Close inspector" onClick={onClose}>
+            ×
+          </button>
+        </div>
+        {drawer.type === 'evidence' ? (
+          <div className="evidence-list">
+            {drawer.agent.evidence.map((evidence) => (
+              <article className="evidence-item" key={evidence.conversationId}>
+                <div className="evidence-meta">
+                  <span>{sourceName[evidence.provider]}</span>
+                  <span>
+                    {evidence.timestamp
+                      ? new Date(evidence.timestamp).toLocaleDateString()
+                      : 'Date unavailable'}
+                  </span>
+                </div>
+                <h3>{evidence.title}</h3>
+                <blockquote>“{evidence.excerpt}”</blockquote>
+                <code>{evidence.conversationId}</code>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="brain-browser">
+            <nav className="file-tree" aria-label="Brain files">
+              {drawer.agent.brainFiles.map((file) => (
+                <button
+                  className={file.name === selectedFile?.name ? 'active' : ''}
+                  key={file.name}
+                  onClick={() => setActiveFile(file.name)}
+                >
+                  {file.name}
+                </button>
+              ))}
+            </nav>
+            {selectedFile && <MarkdownPreview content={selectedFile.content} />}
+          </div>
+        )}
+      </aside>
+    </div>
+  )
+}
+
 export default function App(): React.JSX.Element {
   const [state, setState] = useState<ScreenState>('ready')
   const [result, setResult] = useState<ImportResult | null>(null)
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null)
   const [progress, setProgress] = useState<AnalysisProgress | null>(null)
   const [error, setError] = useState('')
+  const [agents, setAgents] = useState<AgentSuggestion[]>([])
+  const [dismissed, setDismissed] = useState<{ agent: AgentSuggestion; index: number } | null>(null)
+  const [drawer, setDrawer] = useState<DrawerState>(null)
+  const [mergeSourceId, setMergeSourceId] = useState<string | null>(null)
+  const [mergeTargetId, setMergeTargetId] = useState<string>('')
+  const [busyMessage, setBusyMessage] = useState('')
+  const [operationError, setOperationError] = useState('')
+  const [creationPlan, setCreationPlan] = useState<CreationPlan | null>(null)
+  const [manifest, setManifest] = useState<GeneratedOutputManifest | null>(null)
 
   useEffect(() => window.turnstone.onAnalysisProgress(setProgress), [])
 
@@ -77,6 +205,7 @@ export default function App(): React.JSX.Element {
     try {
       const nextAnalysis = await window.turnstone.analyzeHistories(setupStyle)
       setAnalysis(nextAnalysis)
+      setAgents(nextAnalysis.agents)
       setState('suggestions')
     } catch {
       setError('We couldn’t finish the analysis. Your imported conversations are still ready.')
@@ -84,13 +213,116 @@ export default function App(): React.JSX.Element {
     }
   }
 
+  function updateAgentName(agentId: string, name: string): void {
+    setAgents((current) =>
+      current.map((agent) => (agent.id === agentId ? renameAgent(agent, name) : agent)),
+    )
+  }
+
+  function dismissAgent(agentId: string): void {
+    setAgents((current) => {
+      const index = current.findIndex((agent) => agent.id === agentId)
+      if (index < 0) return current
+      setDismissed({ agent: current[index]!, index })
+      return current.filter((agent) => agent.id !== agentId)
+    })
+    setMergeSourceId(null)
+    setOperationError('')
+  }
+
+  function undoDismiss(): void {
+    if (!dismissed) return
+    setAgents((current) => {
+      const next = [...current]
+      next.splice(Math.min(dismissed.index, next.length), 0, dismissed.agent)
+      return next
+    })
+    setDismissed(null)
+  }
+
+  function beginMerge(agentId: string): void {
+    const target = agents.find((agent) => agent.id !== agentId)
+    setMergeSourceId(agentId)
+    setMergeTargetId(target?.id ?? '')
+    setOperationError('')
+  }
+
+  async function mergeSelectedAgents(): Promise<void> {
+    const first = agents.find((agent) => agent.id === mergeSourceId)
+    const second = agents.find((agent) => agent.id === mergeTargetId)
+    if (!first || !second) return
+    setBusyMessage('Regenerating merged Brain…')
+    setOperationError('')
+    try {
+      const merged = await window.turnstone.mergeAgents(first, second)
+      const firstIndex = agents.findIndex((agent) => agent.id === first.id)
+      const secondIndex = agents.findIndex((agent) => agent.id === second.id)
+      setAgents((current) => {
+        const next = current.filter((agent) => agent.id !== first.id && agent.id !== second.id)
+        next.splice(Math.min(firstIndex, secondIndex), 0, merged.agent)
+        return next
+      })
+      setDismissed(null)
+      setMergeSourceId(null)
+    } catch {
+      setOperationError('We couldn’t merge those Agents. Nothing was changed.')
+    } finally {
+      setBusyMessage('')
+    }
+  }
+
+  async function prepareCreation(): Promise<void> {
+    if (agents.length === 0) {
+      setOperationError('Keep at least one Agent before continuing.')
+      return
+    }
+    setBusyMessage('Checking folder names…')
+    setOperationError('')
+    try {
+      setCreationPlan(await window.turnstone.planCreation(agents))
+      setState('confirming')
+    } catch {
+      setOperationError('We couldn’t prepare the folder plan. No files were written.')
+    } finally {
+      setBusyMessage('')
+    }
+  }
+
+  async function changeDestination(): Promise<void> {
+    const destination = await window.turnstone.chooseDestination()
+    if (!destination) return
+    setBusyMessage('Updating folder plan…')
+    try {
+      setCreationPlan(await window.turnstone.planCreation(agents))
+    } catch {
+      setOperationError('We couldn’t use that destination. No files were written.')
+    } finally {
+      setBusyMessage('')
+    }
+  }
+
+  async function createAgents(): Promise<void> {
+    setState('creating')
+    setOperationError('')
+    try {
+      const output = await window.turnstone.createAgents()
+      setManifest(output)
+      setState('complete')
+    } catch {
+      setOperationError('We couldn’t create the Agent folders. Review the plan and try again.')
+      setState('confirming')
+    }
+  }
+
   const activeStep = progress ? analysisSteps.findIndex((item) => item.step === progress.step) : 0
+
+  const wideState = ['suggestions', 'confirming', 'creating', 'complete'].includes(state)
 
   return (
     <main className="shell">
       <section className={`canvas canvas--${state}`} aria-labelledby="page-title">
         <div className="body">
-          <div className={`content ${state === 'suggestions' ? 'content--wide' : ''}`}>
+          <div className={`content ${wideState ? 'content--wide' : ''}`}>
             {state === 'ready' && (
               <>
                 <p className="kicker">BUILD YOUR AGENT TEAM</p>
@@ -225,8 +457,7 @@ export default function App(): React.JSX.Element {
                   <div>
                     <p className="kicker">YOUR PROPOSED TEAM</p>
                     <h1 id="page-title">
-                      {analysis.agents.length} Agent{analysis.agents.length === 1 ? '' : 's'},
-                      shaped by
+                      {agents.length} Agent{agents.length === 1 ? '' : 's'}, shaped by
                       <span>the work you already do.</span>
                     </h1>
                   </div>
@@ -239,13 +470,25 @@ export default function App(): React.JSX.Element {
                   </p>
                 </div>
                 <div className="agent-grid">
-                  {analysis.agents.map((agent) => (
+                  {agents.map((agent) => (
                     <article className="agent-card" key={agent.id}>
                       <div className="agent-meta">
                         <span>{agent.confidence}</span>
                         <span>{agent.conversationIds.length} conversations</span>
                       </div>
-                      <h2>{agent.name}</h2>
+                      {analysis.setupStyle === 'review' ? (
+                        <input
+                          className="agent-name-input"
+                          aria-label={`Rename ${agent.name}`}
+                          defaultValue={agent.name}
+                          onBlur={(event) => updateAgentName(agent.id, event.currentTarget.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') event.currentTarget.blur()
+                          }}
+                        />
+                      ) : (
+                        <h2>{agent.name}</h2>
+                      )}
                       <p className="agent-purpose">{agent.purpose}</p>
                       <div className="topic-list">
                         {agent.topics.map((topic) => (
@@ -253,13 +496,198 @@ export default function App(): React.JSX.Element {
                         ))}
                       </div>
                       {agent.evidence[0] && <blockquote>“{agent.evidence[0].excerpt}”</blockquote>}
-                      <p className="brain-count">5 Brain files prepared</p>
+                      <div className="agent-actions">
+                        <button onClick={() => setDrawer({ type: 'evidence', agent })}>
+                          Evidence
+                        </button>
+                        <button onClick={() => setDrawer({ type: 'brain', agent })}>
+                          Brain preview
+                        </button>
+                        {analysis.setupStyle === 'review' && agents.length > 1 && (
+                          <button onClick={() => beginMerge(agent.id)}>Merge</button>
+                        )}
+                        {analysis.setupStyle === 'review' && (
+                          <button className="danger-action" onClick={() => dismissAgent(agent.id)}>
+                            Dismiss
+                          </button>
+                        )}
+                      </div>
+                      {mergeSourceId === agent.id && (
+                        <div className="merge-menu">
+                          <label htmlFor={`merge-${agent.id}`}>Merge with</label>
+                          <select
+                            id={`merge-${agent.id}`}
+                            value={mergeTargetId}
+                            onChange={(event) => setMergeTargetId(event.currentTarget.value)}
+                          >
+                            {agents
+                              .filter((candidate) => candidate.id !== agent.id)
+                              .map((candidate) => (
+                                <option value={candidate.id} key={candidate.id}>
+                                  {candidate.name}
+                                </option>
+                              ))}
+                          </select>
+                          <button
+                            disabled={Boolean(busyMessage)}
+                            onClick={() => void mergeSelectedAgents()}
+                          >
+                            Combine
+                          </button>
+                          <button onClick={() => setMergeSourceId(null)}>Cancel</button>
+                        </div>
+                      )}
                     </article>
                   ))}
                 </div>
-                <p className="phase-note">
-                  Review controls and folder creation arrive in the next step of this build.
+                {dismissed && (
+                  <div className="undo-bar" role="status">
+                    <span>{dismissed.agent.name} dismissed.</span>
+                    <button onClick={undoDismiss}>Undo</button>
+                  </div>
+                )}
+                {busyMessage && (
+                  <p className="operation-status" role="status">
+                    {busyMessage}
+                  </p>
+                )}
+                {operationError && (
+                  <p className="operation-error" role="alert">
+                    {operationError}
+                  </p>
+                )}
+                <footer className="review-footer">
+                  <p>
+                    {analysis.setupStyle === 'review'
+                      ? 'Shape the team, then review the exact folders.'
+                      : 'Review the evidence, then confirm the exact folders.'}
+                  </p>
+                  <button
+                    className="primary"
+                    disabled={agents.length === 0 || Boolean(busyMessage)}
+                    onClick={() => void prepareCreation()}
+                  >
+                    Review {agents.length} Agent{agents.length === 1 ? '' : 's'}
+                  </button>
+                </footer>
+              </>
+            )}
+
+            {state === 'confirming' && creationPlan && (
+              <>
+                <div className="suggestion-heading">
+                  <div>
+                    <p className="kicker">READY TO CREATE</p>
+                    <h1 id="page-title">
+                      Review every folder<span>before it’s written.</span>
+                    </h1>
+                  </div>
+                  <button
+                    className="secondary-button"
+                    disabled={Boolean(busyMessage)}
+                    onClick={() => void changeDestination()}
+                  >
+                    Change destination
+                  </button>
+                </div>
+                <div className="destination-panel">
+                  <p>Destination</p>
+                  <code>{creationPlan.destination}</code>
+                </div>
+                <div className="creation-list">
+                  {creationPlan.agents.map((plannedAgent) => (
+                    <article className="creation-row" key={plannedAgent.agentId}>
+                      <div>
+                        <h2>{plannedAgent.folderName}</h2>
+                        <p>{plannedAgent.name}</p>
+                      </div>
+                      <div className="file-manifest">
+                        {plannedAgent.files.map((file) => (
+                          <span key={file}>{file}</span>
+                        ))}
+                      </div>
+                      {plannedAgent.collisionResolved && (
+                        <span className="collision-note">Renamed to avoid an existing folder</span>
+                      )}
+                    </article>
+                  ))}
+                </div>
+                {busyMessage && (
+                  <p className="operation-status" role="status">
+                    {busyMessage}
+                  </p>
+                )}
+                {operationError && (
+                  <p className="operation-error" role="alert">
+                    {operationError}
+                  </p>
+                )}
+                <footer className="review-footer">
+                  <button className="secondary-button" onClick={() => setState('suggestions')}>
+                    Back to Agents
+                  </button>
+                  <button
+                    className="primary"
+                    disabled={Boolean(busyMessage)}
+                    onClick={() => void createAgents()}
+                  >
+                    Create Agent folders
+                  </button>
+                </footer>
+              </>
+            )}
+
+            {state === 'creating' && (
+              <div className="centered-state">
+                <span className="spinner" aria-hidden="true" />
+                <p className="kicker">CREATING YOUR TEAM</p>
+                <h1 id="page-title">
+                  Writing five focused files<span>for every Agent.</span>
+                </h1>
+                <p className="lede">Existing folders will not be overwritten.</p>
+              </div>
+            )}
+
+            {state === 'complete' && manifest && (
+              <>
+                <p className="kicker">YOUR TEAM IS READY</p>
+                <h1 id="page-title">
+                  Created {manifest.agents.filter((agent) => agent.status === 'created').length}{' '}
+                  Agent
+                  <span>
+                    folder
+                    {manifest.agents.filter((agent) => agent.status === 'created').length === 1
+                      ? ''
+                      : 's'}{' '}
+                    on this Mac.
+                  </span>
+                </h1>
+                <p className="lede">
+                  Each folder contains the reviewed Brain files and source-backed context.
                 </p>
+                <div className="completion-list">
+                  {manifest.agents.map((agent) => (
+                    <article
+                      className={`completion-row completion-row--${agent.status}`}
+                      key={agent.agentId}
+                    >
+                      <span className="status-dot" aria-hidden="true" />
+                      <div>
+                        <h2>{agent.folderName}</h2>
+                        <p>
+                          {agent.status === 'created'
+                            ? `${agent.files.length} files created`
+                            : agent.error}
+                        </p>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+                {manifest.agents.some((agent) => agent.status === 'created') && (
+                  <button className="primary" onClick={() => void window.turnstone.revealAgents()}>
+                    Reveal in Finder
+                  </button>
+                )}
               </>
             )}
 
@@ -280,12 +708,13 @@ export default function App(): React.JSX.Element {
             )}
           </div>
 
-          {state !== 'suggestions' && (
+          {!wideState && (
             <figure className="visual" aria-hidden="true">
               <img src={templeImage} alt="" />
             </figure>
           )}
         </div>
+        <ReviewDrawer drawer={drawer} onClose={() => setDrawer(null)} />
       </section>
     </main>
   )

@@ -167,3 +167,41 @@ export const AnalysisResultSchema = z.object({
   diagnostics: z.array(DiagnosticSchema),
 })
 export type AnalysisResult = z.infer<typeof AnalysisResultSchema>
+
+export const MergeResultSchema = z.object({
+  agent: AgentSuggestionSchema,
+  mode: z.enum(['openai', 'deterministic']),
+})
+export type MergeResult = z.infer<typeof MergeResultSchema>
+
+export const CreationPlanAgentSchema = z.object({
+  agentId: z.string(),
+  name: z.string(),
+  folderName: z.string(),
+  path: z.string(),
+  files: z.array(BrainFileNameSchema).length(5),
+  collisionResolved: z.boolean(),
+})
+export type CreationPlanAgent = z.infer<typeof CreationPlanAgentSchema>
+
+export const CreationPlanSchema = z.object({
+  destination: z.string(),
+  agents: z.array(CreationPlanAgentSchema).min(1).max(5),
+})
+export type CreationPlan = z.infer<typeof CreationPlanSchema>
+
+export const GeneratedAgentSchema = z.object({
+  agentId: z.string(),
+  folderName: z.string(),
+  path: z.string(),
+  files: z.array(z.string()),
+  status: z.enum(['created', 'error']),
+  error: z.string().nullable(),
+})
+export type GeneratedAgent = z.infer<typeof GeneratedAgentSchema>
+
+export const GeneratedOutputManifestSchema = z.object({
+  destination: z.string(),
+  agents: z.array(GeneratedAgentSchema).min(1).max(5),
+})
+export type GeneratedOutputManifest = z.infer<typeof GeneratedOutputManifestSchema>

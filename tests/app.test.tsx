@@ -77,6 +77,34 @@ const analyzed: AnalysisResult = {
   diagnostics: [],
 }
 
+const creationPlan = {
+  destination: '/example/Turnstone/Agents',
+  agents: [
+    {
+      agentId: 'agent-1',
+      name: 'Importer Agent',
+      folderName: 'Importer-Agent',
+      path: '/example/Turnstone/Agents/Importer-Agent',
+      files: analyzed.agents[0]!.brainFiles.map((file) => file.name),
+      collisionResolved: false,
+    },
+  ],
+}
+
+const manifest = {
+  destination: creationPlan.destination,
+  agents: [
+    {
+      agentId: 'agent-1',
+      folderName: 'Importer-Agent',
+      path: '/example/Turnstone/Agents/Importer-Agent',
+      files: creationPlan.agents[0]!.files.map((file) => `${creationPlan.agents[0]!.path}/${file}`),
+      status: 'created' as const,
+      error: null,
+    },
+  ],
+}
+
 describe('App discovery and analysis flow', () => {
   afterEach(cleanup)
 
@@ -84,8 +112,15 @@ describe('App discovery and analysis flow', () => {
     window.turnstone = {
       scanHistories: vi.fn().mockResolvedValue(imported),
       loadSampleHistories: vi.fn().mockResolvedValue(imported),
-      analyzeHistories: vi.fn().mockResolvedValue(analyzed),
+      analyzeHistories: vi
+        .fn()
+        .mockImplementation(async (setupStyle) => ({ ...analyzed, setupStyle })),
       onAnalysisProgress: vi.fn().mockReturnValue(() => undefined),
+      mergeAgents: vi.fn(),
+      chooseDestination: vi.fn().mockResolvedValue('/example/Turnstone/Agents'),
+      planCreation: vi.fn().mockResolvedValue(creationPlan),
+      createAgents: vi.fn().mockResolvedValue(manifest),
+      revealAgents: vi.fn().mockResolvedValue(undefined),
     }
   })
 
@@ -115,7 +150,7 @@ describe('App discovery and analysis flow', () => {
     expect(await screen.findByText('YOUR PROPOSED TEAM')).toBeInTheDocument()
     expect(window.turnstone.analyzeHistories).toHaveBeenCalledWith('automatic')
     expect(screen.getByRole('heading', { name: 'Importer Agent' })).toBeInTheDocument()
-    expect(screen.getByText('5 Brain files prepared')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Brain preview' })).toBeInTheDocument()
   })
 
   it('can enter the flow with bundled sample data', async () => {
@@ -139,5 +174,49 @@ describe('App discovery and analysis flow', () => {
 
     expect(await screen.findByText('YOUR PROPOSED TEAM')).toBeInTheDocument()
     expect(window.turnstone.analyzeHistories).toHaveBeenCalledWith('review')
+  })
+
+  it('supports rename, evidence inspection, dismiss, and undo in review mode', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Import from this Mac' }))
+    await user.click(await screen.findByRole('button', { name: 'Continue' }))
+    await user.click(screen.getByRole('button', { name: /Let me review/ }))
+
+    const name = await screen.findByRole('textbox', { name: 'Rename Importer Agent' })
+    await user.clear(name)
+    await user.type(name, 'Trusted Import Agent{Enter}')
+    expect(screen.getByRole('button', { name: 'Review 1 Agent' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Evidence' }))
+    expect(screen.getByRole('complementary', { name: 'Agent evidence' })).toBeInTheDocument()
+    expect(screen.getByText('Build the importer')).toBeInTheDocument()
+    await user.click(screen.getAllByRole('button', { name: 'Close inspector' })[0]!)
+
+    await user.click(screen.getByRole('button', { name: 'Dismiss' }))
+    expect(screen.getByText('Trusted Import Agent dismissed.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(screen.getByRole('textbox', { name: 'Rename Trusted Import Agent' })).toBeInTheDocument()
+  })
+
+  it('confirms the exact manifest, creates folders, and reveals the result', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Import from this Mac' }))
+    await user.click(await screen.findByRole('button', { name: 'Continue' }))
+    await user.click(screen.getByRole('button', { name: /Set it up for me/ }))
+    await user.click(await screen.findByRole('button', { name: 'Review 1 Agent' }))
+
+    expect(await screen.findByText('READY TO CREATE')).toBeInTheDocument()
+    expect(screen.getByText('/example/Turnstone/Agents')).toBeInTheDocument()
+    expect(screen.getByText('Importer-Agent')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Create Agent folders' }))
+    expect(await screen.findByText('YOUR TEAM IS READY')).toBeInTheDocument()
+    expect(window.turnstone.createAgents).toHaveBeenCalledOnce()
+    await user.click(screen.getByRole('button', { name: 'Reveal in Finder' }))
+    expect(window.turnstone.revealAgents).toHaveBeenCalledOnce()
   })
 })
