@@ -2,9 +2,14 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { IPC_CHANNELS } from '../shared/ipc'
+import { SetupStyleSchema, type ImportResult } from '../shared/schemas'
+import { analyzeConversations } from './intelligence/pipeline'
+import { sampleImportResult } from './sample'
 import { scanHistories } from './sources/discovery'
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+let latestImport: ImportResult | null = null
 
 function createWindow(): void {
   const window = new BrowserWindow({
@@ -42,15 +47,42 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
-  ipcMain.handle(IPC_CHANNELS.scanHistories, async () => scanHistories())
-  createWindow()
+if (!hasSingleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    const existingWindow = BrowserWindow.getAllWindows()[0]
+    if (!existingWindow) return
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (existingWindow.isMinimized()) existingWindow.restore()
+    existingWindow.show()
+    existingWindow.focus()
   })
-})
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
-})
+  app.whenReady().then(() => {
+    ipcMain.handle(IPC_CHANNELS.scanHistories, async () => {
+      latestImport = await scanHistories()
+      return latestImport
+    })
+    ipcMain.handle(IPC_CHANNELS.loadSampleHistories, () => {
+      latestImport = sampleImportResult()
+      return latestImport
+    })
+    ipcMain.handle(IPC_CHANNELS.analyzeHistories, async (event, rawSetupStyle: unknown) => {
+      const setupStyle = SetupStyleSchema.parse(rawSetupStyle)
+      if (!latestImport) throw new Error('Import conversation history before starting analysis.')
+      return analyzeConversations(latestImport.conversations, setupStyle, (progress) => {
+        if (!event.sender.isDestroyed()) event.sender.send(IPC_CHANNELS.analysisProgress, progress)
+      })
+    })
+    createWindow()
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
+  })
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit()
+  })
+}

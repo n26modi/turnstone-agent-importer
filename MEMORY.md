@@ -4,7 +4,7 @@ This file is the durable project brief, implementation plan, and study guide for
 
 ## Current implementation status
 
-Phase 1 is complete. The repository contains the Electron/React/TypeScript foundation, secure typed IPC, real Claude Code and Codex discovery, thin conversation documents with provenance, sanitized fixtures, focused parser and UI tests, and CI. A local smoke scan found 16 Claude Code conversations and 1 Codex conversation containing 1,351 visible messages with no parser diagnostics.
+Phases 1 and 2 are complete. The repository contains the Electron/React/TypeScript foundation, secure typed IPC, real Claude Code and Codex discovery, thin conversation documents with provenance, local transcript preparation and secret redaction, structured OpenAI summarization, Agent clustering, five-file Brain synthesis, meaningful analysis progress, deterministic and partial-failure recovery, sample data, and focused parser, intelligence, and UI-flow tests. A local smoke scan found 16 Claude Code conversations and 1 Codex conversation containing 1,351 visible messages with no parser diagnostics. The Phase 2 bundled-sample live test completed through the OpenAI Responses API with validated structured output and no fallback.
 
 ## Product goal
 
