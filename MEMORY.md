@@ -4,7 +4,7 @@ This file is the durable project brief, implementation plan, and study guide for
 
 ## Current implementation status
 
-Phases 1 and 2 are complete. The repository contains the Electron/React/TypeScript foundation, secure typed IPC, real Claude Code and Codex discovery, thin conversation documents with provenance, local transcript preparation and secret redaction, structured OpenAI summarization, Agent clustering, five-file Brain synthesis, meaningful analysis progress, deterministic and partial-failure recovery, sample data, and focused parser, intelligence, and UI-flow tests. A local smoke scan found 16 Claude Code conversations and 1 Codex conversation containing 1,351 visible messages with no parser diagnostics. The Phase 2 bundled-sample live test completed through the OpenAI Responses API with validated structured output and no fallback.
+Phases 1–4 are implemented. The repository contains the Electron/React/TypeScript foundation, secure typed IPC, real Claude Code and Codex discovery, thin conversation documents with provenance, local transcript preparation and secret redaction, structured OpenAI summarization, Agent clustering, five-file Brain synthesis, meaningful analysis progress, deterministic and partial-failure recovery, collaborative review, safe folder creation, polished edge states, reviewer documentation, and focused parser, intelligence, writer, and UI-flow tests. A local smoke scan found 16 Claude Code conversations and 1 Codex conversation containing 1,351 visible messages with no parser diagnostics. The Phase 2 bundled-sample live test completed through the OpenAI Responses API with validated structured output and no fallback.
 
 ## Product goal
 
@@ -434,6 +434,8 @@ Before completion, run and report actual results for:
 
 ### Phase 1 — Foundation and sources
 
+Status: complete.
+
 - Initialize Electron, React, TypeScript, and Vite.
 - Add formatting, linting, tests, and CI.
 - Define runtime schemas and typed IPC.
@@ -441,6 +443,8 @@ Before completion, run and report actual results for:
 - Implement Claude Code and Codex discovery, parsing, normalization, and diagnostics.
 
 ### Phase 2 — Intelligence and core flow
+
+Status: complete.
 
 - Implement local transcript cleaning and bounded excerpt selection.
 - Implement OpenAI structured summarization.
@@ -450,12 +454,16 @@ Before completion, run and report actual results for:
 
 ### Phase 3 — Review and creation
 
+Status: complete.
+
 - Build Agent cards and evidence inspection.
 - Add rename, dismiss, merge, and undo.
 - Build Brain file-tree and Markdown preview.
 - Implement destination selection, confirmation, collision handling, writing, and completion.
 
 ### Phase 4 — Product polish and delivery
+
+Status: complete.
 
 - Refine hierarchy, typography, spacing, motion, and all edge states.
 - Complete tests and CI.

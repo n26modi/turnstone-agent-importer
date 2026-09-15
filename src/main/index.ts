@@ -18,6 +18,8 @@ import { sampleImportResult } from './sample'
 import { scanHistories } from './sources/discovery'
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
+app.setName('Turnstone Agent Importer')
+app.setPath('userData', path.join(app.getPath('appData'), 'Turnstone Agent Importer'))
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 let latestImport: ImportResult | null = null
 let latestAnalysis: AnalysisResult | null = null

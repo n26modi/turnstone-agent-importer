@@ -26,12 +26,9 @@ describe.runIf(runLive)('OpenAI live analysis', () => {
 
   it('regenerates a merged Brain with structured output', async () => {
     const imported = sampleImportResult()
-    const localAnalysis = await analyzeConversations(
-      imported.conversations,
-      'review',
-      undefined,
-      { model: null },
-    )
+    const localAnalysis = await analyzeConversations(imported.conversations, 'review', undefined, {
+      model: null,
+    })
     const [first, second] = localAnalysis.agents
     expect(first).toBeDefined()
     expect(second).toBeDefined()

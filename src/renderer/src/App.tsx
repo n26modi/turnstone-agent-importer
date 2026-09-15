@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   AgentSuggestion,
   AnalysisProgress,
@@ -36,9 +36,32 @@ const analysisSteps: Array<{ step: AnalysisProgress['step']; label: string }> = 
   { step: 'synthesizing', label: 'Writing evidence-backed Brains' },
 ]
 
+const screenLabel: Record<ScreenState, string> = {
+  ready: 'Import',
+  scanning: 'Import',
+  found: 'Import',
+  setup: 'Setup',
+  analyzing: 'Analysis',
+  suggestions: 'Review',
+  confirming: 'Confirm',
+  creating: 'Create',
+  complete: 'Complete',
+  error: 'Recovery',
+}
+
 function sourceSummary(source: ImportResult['sources'][number]): string {
   if (source.status === 'found') {
-    return `${source.conversationCount} conversation${source.conversationCount === 1 ? '' : 's'}`
+    const count = `${source.conversationCount} conversation${source.conversationCount === 1 ? '' : 's'}`
+    if (!source.startedAt || !source.updatedAt) return count
+    const start = new Date(source.startedAt).toLocaleDateString(undefined, {
+      month: 'short',
+      year: 'numeric',
+    })
+    const end = new Date(source.updatedAt).toLocaleDateString(undefined, {
+      month: 'short',
+      year: 'numeric',
+    })
+    return `${count} · ${start === end ? start : `${start}–${end}`}`
   }
   if (source.status === 'missing') return 'No local history found'
   if (source.status === 'empty') return 'No conversations yet'
@@ -84,11 +107,20 @@ function ReviewDrawer({
   drawer,
   onClose,
 }: {
-  drawer: DrawerState
+  drawer: NonNullable<DrawerState>
   onClose: () => void
-}): React.JSX.Element | null {
+}): React.JSX.Element {
   const [activeFile, setActiveFile] = useState('README.md')
-  if (!drawer) return null
+  const closeButton = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    closeButton.current?.focus()
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [drawer, onClose])
   const selectedFile =
     drawer.agent.brainFiles.find((file) => file.name === activeFile) ?? drawer.agent.brainFiles[0]
 
@@ -97,6 +129,8 @@ function ReviewDrawer({
       <button className="drawer-scrim" aria-label="Close inspector" onClick={onClose} />
       <aside
         className="drawer"
+        role="dialog"
+        aria-modal="true"
         aria-label={drawer.type === 'evidence' ? 'Agent evidence' : 'Brain preview'}
       >
         <div className="drawer-header">
@@ -106,7 +140,12 @@ function ReviewDrawer({
             </p>
             <h2>{drawer.agent.name}</h2>
           </div>
-          <button className="icon-button" aria-label="Close inspector" onClick={onClose}>
+          <button
+            ref={closeButton}
+            className="icon-button"
+            aria-label="Close inspector"
+            onClick={onClose}
+          >
             ×
           </button>
         </div>
@@ -164,8 +203,26 @@ export default function App(): React.JSX.Element {
   const [operationError, setOperationError] = useState('')
   const [creationPlan, setCreationPlan] = useState<CreationPlan | null>(null)
   const [manifest, setManifest] = useState<GeneratedOutputManifest | null>(null)
+  const closeDrawer = useCallback(() => setDrawer(null), [])
 
-  useEffect(() => window.turnstone.onAnalysisProgress(setProgress), [])
+  useEffect(() => window.turnstone?.onAnalysisProgress(setProgress), [])
+
+  function startOver(): void {
+    setState('ready')
+    setResult(null)
+    setAnalysis(null)
+    setProgress(null)
+    setError('')
+    setAgents([])
+    setDismissed(null)
+    setDrawer(null)
+    setMergeSourceId(null)
+    setMergeTargetId('')
+    setBusyMessage('')
+    setOperationError('')
+    setCreationPlan(null)
+    setManifest(null)
+  }
 
   async function scan(): Promise<void> {
     setState('scanning')
@@ -292,6 +349,7 @@ export default function App(): React.JSX.Element {
     const destination = await window.turnstone.chooseDestination()
     if (!destination) return
     setBusyMessage('Updating folder plan…')
+    setOperationError('')
     try {
       setCreationPlan(await window.turnstone.planCreation(agents))
     } catch {
@@ -317,12 +375,18 @@ export default function App(): React.JSX.Element {
   const activeStep = progress ? analysisSteps.findIndex((item) => item.step === progress.step) : 0
 
   const wideState = ['suggestions', 'confirming', 'creating', 'complete'].includes(state)
+  const createdCount = manifest?.agents.filter((agent) => agent.status === 'created').length ?? 0
+  const failedCount = manifest?.agents.filter((agent) => agent.status === 'error').length ?? 0
 
   return (
     <main className="shell">
       <section className={`canvas canvas--${state}`} aria-labelledby="page-title">
+        <header className="app-chrome" aria-label="Application progress">
+          <span className="app-wordmark">TURNSTONE</span>
+          <span className="app-step">{screenLabel[state]}</span>
+        </header>
         <div className="body">
-          <div className={`content ${wideState ? 'content--wide' : ''}`}>
+          <div key={state} className={`content ${wideState ? 'content--wide' : ''}`}>
             {state === 'ready' && (
               <>
                 <p className="kicker">BUILD YOUR AGENT TEAM</p>
@@ -392,6 +456,16 @@ export default function App(): React.JSX.Element {
                 >
                   Continue
                 </button>
+                {result.conversations.length === 0 && (
+                  <button className="text-button sample-button" onClick={() => void loadSample()}>
+                    Try the complete flow with sample data
+                  </button>
+                )}
+                {result.sources.some((source) => source.status === 'error') && (
+                  <p className="trust-note" role="status">
+                    Some history could not be read. Everything available is still ready to use.
+                  </p>
+                )}
               </>
             )}
 
@@ -539,6 +613,16 @@ export default function App(): React.JSX.Element {
                       )}
                     </article>
                   ))}
+                  {agents.length === 0 && dismissed && (
+                    <div className="empty-agents">
+                      <p className="kicker">NO AGENTS KEPT</p>
+                      <h2>Your proposed team is empty.</h2>
+                      <p>Undo the last dismissal to keep shaping this setup.</p>
+                      <button className="secondary-button" onClick={undoDismiss}>
+                        Restore {dismissed.agent.name}
+                      </button>
+                    </div>
+                  )}
                 </div>
                 {dismissed && (
                   <div className="undo-bar" role="status">
@@ -650,20 +734,21 @@ export default function App(): React.JSX.Element {
 
             {state === 'complete' && manifest && (
               <>
-                <p className="kicker">YOUR TEAM IS READY</p>
+                <p className="kicker">
+                  {failedCount === 0 ? 'YOUR TEAM IS READY' : 'CREATION COMPLETE'}
+                </p>
                 <h1 id="page-title">
-                  Created {manifest.agents.filter((agent) => agent.status === 'created').length}{' '}
-                  Agent
+                  {createdCount > 0 ? `Created ${createdCount} Agent` : 'No folders were created'}
                   <span>
-                    folder
-                    {manifest.agents.filter((agent) => agent.status === 'created').length === 1
-                      ? ''
-                      : 's'}{' '}
-                    on this Mac.
+                    {createdCount > 0
+                      ? `folder${createdCount === 1 ? '' : 's'} on this Mac.`
+                      : 'Your existing files are untouched.'}
                   </span>
                 </h1>
                 <p className="lede">
-                  Each folder contains the reviewed Brain files and source-backed context.
+                  {failedCount === 0
+                    ? 'Each folder contains the reviewed Brain files and source-backed context.'
+                    : `${failedCount} folder${failedCount === 1 ? '' : 's'} could not be created. Successful folders were kept.`}
                 </p>
                 <div className="completion-list">
                   {manifest.agents.map((agent) => (
@@ -683,11 +768,24 @@ export default function App(): React.JSX.Element {
                     </article>
                   ))}
                 </div>
-                {manifest.agents.some((agent) => agent.status === 'created') && (
-                  <button className="primary" onClick={() => void window.turnstone.revealAgents()}>
-                    Reveal in Finder
+                <div className="completion-actions">
+                  {createdCount > 0 && (
+                    <button
+                      className="primary"
+                      onClick={() => void window.turnstone.revealAgents()}
+                    >
+                      Reveal in Finder
+                    </button>
+                  )}
+                  {failedCount > 0 && (
+                    <button className="secondary-button" onClick={() => void prepareCreation()}>
+                      Review folder plan
+                    </button>
+                  )}
+                  <button className="text-button" onClick={startOver}>
+                    Start over
                   </button>
-                )}
+                </div>
               </>
             )}
 
@@ -714,7 +812,7 @@ export default function App(): React.JSX.Element {
             </figure>
           )}
         </div>
-        <ReviewDrawer drawer={drawer} onClose={() => setDrawer(null)} />
+        {drawer && <ReviewDrawer drawer={drawer} onClose={closeDrawer} />}
       </section>
     </main>
   )

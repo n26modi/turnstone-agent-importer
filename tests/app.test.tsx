@@ -164,6 +164,28 @@ describe('App discovery and analysis flow', () => {
     expect(window.turnstone.scanHistories).not.toHaveBeenCalled()
   })
 
+  it('offers sample data when no local conversations are found', async () => {
+    const user = userEvent.setup()
+    vi.mocked(window.turnstone.scanHistories).mockResolvedValueOnce({
+      sources: imported.sources.map((source) => ({
+        ...source,
+        status: 'empty',
+        conversationCount: 0,
+      })),
+      conversations: [],
+      diagnostics: [],
+    })
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Import from this Mac' }))
+    await user.click(
+      await screen.findByRole('button', { name: 'Try the complete flow with sample data' }),
+    )
+
+    expect(await screen.findByText('1 conversation')).toBeInTheDocument()
+    expect(window.turnstone.loadSampleHistories).toHaveBeenCalledOnce()
+  })
+
   it('preserves the collaborative setup choice for analysis', async () => {
     const user = userEvent.setup()
     render(<App />)
@@ -190,7 +212,7 @@ describe('App discovery and analysis flow', () => {
     expect(screen.getByRole('button', { name: 'Review 1 Agent' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Evidence' }))
-    expect(screen.getByRole('complementary', { name: 'Agent evidence' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Agent evidence' })).toBeInTheDocument()
     expect(screen.getByText('Build the importer')).toBeInTheDocument()
     await user.click(screen.getAllByRole('button', { name: 'Close inspector' })[0]!)
 
@@ -198,6 +220,20 @@ describe('App discovery and analysis flow', () => {
     expect(screen.getByText('Trusted Import Agent dismissed.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Undo' }))
     expect(screen.getByRole('textbox', { name: 'Rename Trusted Import Agent' })).toBeInTheDocument()
+  })
+
+  it('closes an inspector with Escape', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Import from this Mac' }))
+    await user.click(await screen.findByRole('button', { name: 'Continue' }))
+    await user.click(screen.getByRole('button', { name: /Set it up for me/ }))
+    await user.click(await screen.findByRole('button', { name: 'Brain preview' }))
+    expect(screen.getByRole('dialog', { name: 'Brain preview' })).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog', { name: 'Brain preview' })).not.toBeInTheDocument()
   })
 
   it('confirms the exact manifest, creates folders, and reveals the result', async () => {
@@ -218,5 +254,34 @@ describe('App discovery and analysis flow', () => {
     expect(window.turnstone.createAgents).toHaveBeenCalledOnce()
     await user.click(screen.getByRole('button', { name: 'Reveal in Finder' }))
     expect(window.turnstone.revealAgents).toHaveBeenCalledOnce()
+  })
+
+  it('reports a safe partial creation result and can start over', async () => {
+    const user = userEvent.setup()
+    vi.mocked(window.turnstone.createAgents).mockResolvedValueOnce({
+      destination: creationPlan.destination,
+      agents: [
+        {
+          agentId: 'agent-1',
+          folderName: 'Importer-Agent',
+          path: creationPlan.agents[0]!.path,
+          files: [],
+          status: 'error',
+          error: 'The destination changed; review the folder plan again.',
+        },
+      ],
+    })
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Import from this Mac' }))
+    await user.click(await screen.findByRole('button', { name: 'Continue' }))
+    await user.click(screen.getByRole('button', { name: /Set it up for me/ }))
+    await user.click(await screen.findByRole('button', { name: 'Review 1 Agent' }))
+    await user.click(await screen.findByRole('button', { name: 'Create Agent folders' }))
+
+    expect(await screen.findByText('No folders were created')).toBeInTheDocument()
+    expect(screen.getByText('Your existing files are untouched.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Start over' }))
+    expect(screen.getByRole('button', { name: 'Import from this Mac' })).toBeInTheDocument()
   })
 })

@@ -1,5 +1,6 @@
 {
   "name": "turnstone-agent-importer",
+  "productName": "Turnstone Agent Importer",
   "version": "0.1.0",
   "private": true,
   "description": "Turn Claude Code and Codex conversations into evidence-backed Turnstone Agents.",
