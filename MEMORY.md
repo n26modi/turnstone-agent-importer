@@ -465,6 +465,8 @@ Status: complete.
 
 Status: complete.
 
+Final verification on September 15, 2026: a fresh local clone completed `npm ci`, formatting, type checking, linting, 26 tests, and the production Electron build. Two credential-gated OpenAI live tests were intentionally skipped in the standard suite.
+
 - Refine hierarchy, typography, spacing, motion, and all edge states.
 - Complete tests and CI.
 - Write a strong README covering rationale, architecture, privacy, supported sources, and limitations.

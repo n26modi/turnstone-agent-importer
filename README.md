@@ -114,6 +114,8 @@ RUN_OPENAI_LIVE_TEST=1 npm test -- tests/openai.live.test.ts
 
 CI runs installation, type checking, linting, tests, and the production Electron build on every pull request and push to `main`.
 
+The final reviewer walkthrough was also repeated from a fresh clone: installation, formatting, type checking, linting, 26 tests, and the production build all passed. The two credential-gated live tests remain opt-in.
+
 ## Current scope and limitations
 
 This is a take-home prototype, not a production Turnstone integration. It does not include authentication, cloud persistence, ongoing synchronization, Cowork or GPT Work imports, a full Brain editor, telemetry, signing/notarization, or automatic updates. Provider JSONL formats are not public contracts, so parsers are defensive and surface diagnostics when unknown records appear.
