@@ -2,6 +2,10 @@
 
 This file is the durable project brief, implementation plan, and study guide for the Turnstone take-home assignment. Update it when product scope or implementation decisions change.
 
+## Current implementation status
+
+Phase 1 is complete. The repository contains the Electron/React/TypeScript foundation, secure typed IPC, real Claude Code and Codex discovery, thin conversation documents with provenance, sanitized fixtures, focused parser and UI tests, and CI. A local smoke scan found 16 Claude Code conversations and 1 Codex conversation containing 1,351 visible messages with no parser diagnostics.
+
 ## Product goal
 
 Build a polished macOS-first onboarding experience that turns a user's existing Claude Code and Codex conversations into useful Turnstone Agents. Each Agent is defined by a local folder of synthesized Markdown files called its Brain.
@@ -224,10 +228,14 @@ The automatic path skips editing but still shows the proposed Agents, destinatio
 
 ## OpenAI intelligence pipeline
 
+The founder noted that a light model may be able to operate directly on raw transcripts without a heavy normalization stage. The implementation should follow that product-minded simplification: provider adapters create only the thin shared envelope required for the UI, provenance, and batching. They do not attempt to interpret topics, decisions, or Agent roles locally.
+
+Transcript text is lightly cleaned to remove provider-specific system records, tool payloads, and duplicate transport events. Semantic extraction and organization belong to the model.
+
 ```text
 local histories
 → provider adapters
-→ normalized conversations
+→ thin conversation documents with source references
 → bounded conversation batches
 → structured conversation summaries
 → Agent clustering
