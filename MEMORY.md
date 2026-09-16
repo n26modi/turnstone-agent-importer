@@ -4,7 +4,9 @@ This file is the durable project brief, implementation plan, and study guide for
 
 ## Current implementation status
 
-Phases 1–4 are implemented. The repository contains the Electron/React/TypeScript foundation, secure typed IPC, real Claude Code and Codex discovery, thin conversation documents with provenance, local transcript preparation and secret redaction, structured OpenAI summarization, Agent clustering, five-file Brain synthesis, meaningful analysis progress, deterministic and partial-failure recovery, collaborative review, safe folder creation, polished edge states, reviewer documentation, and focused parser, intelligence, writer, and UI-flow tests. A local smoke scan found 16 Claude Code conversations and 1 Codex conversation containing 1,351 visible messages with no parser diagnostics. The Phase 2 bundled-sample live test completed through the OpenAI Responses API with validated structured output and no fallback.
+The submission design pass adds a persistent five-step indicator, primary Brain-preview actions, keyboard-accessible overflow menus, formatted Markdown with source-citation navigation, confidence explanations, real analysis counts, a privacy disclosure, and review totals. Inspectors trap/restore focus and review results are announced. The audit also closes concrete gaps in IPC origin validation, renderer navigation/CSP, secret redaction (including titles), recent-excerpt retention, partial-import recovery, source-evidence completeness, folder containment, duplicate creation, and partial-creation retries. Sample analysis and merging are explicitly local even when credentials exist. Current quality coverage is described in the README; historical counts below record earlier phases.
+
+Phases 1–4 are implemented. The repository contains the Electron/React/TypeScript foundation, secure typed IPC, real Claude Code and Codex discovery, thin conversation documents with provenance, local transcript preparation and secret redaction, structured OpenAI summarization, Agent clustering, five-file Brain synthesis, meaningful analysis progress, deterministic and partial-failure recovery, collaborative review, safe folder creation, polished edge states, reviewer documentation, and focused parser, intelligence, writer, and UI-flow tests. The final privacy-safe local smoke scan found 16 Claude Code conversations and 6 Codex conversations containing 1,544 visible messages. Four unknown Codex content blocks were reported and safely skipped without losing readable sessions. The Phase 2 bundled-sample live test completed through the OpenAI Responses API with validated structured output and no fallback.
 
 ## Product goal
 
@@ -46,9 +48,9 @@ This keeps provider-specific parsing separate from analysis, review, and Brain g
 - macOS-first Electron application using React and TypeScript.
 - Real local scanning and parsing for Claude Code and Codex.
 - OpenAI is the primary intelligence path.
-- `OPENAI_API_KEY` is currently available in the development environment.
+- Live analysis uses `OPENAI_API_KEY` from the launching environment; credentials are never committed. Availability and validity must be checked at run time.
 - Model selection is configurable through `TURNSTONE_OPENAI_MODEL`; the initial default is `gpt-5.5`.
-- Deterministic behavior remains as recovery and as a credential-free sample experience.
+- Deterministic behavior remains as recovery and as a sample experience that never sends data to OpenAI.
 - Both setup styles remain available:
   - **Set it up for me** for a minimally guided automatic path.
   - **Let me review** for lightweight collaborative review.

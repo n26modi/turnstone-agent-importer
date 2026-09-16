@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -99,5 +99,22 @@ describe('Agent output writer', () => {
 
     expect(manifest.agents[0]?.status).toBe('error')
     expect(await readFile(path.join(plan.agents[0]!.path, 'keep.txt'), 'utf8')).toBe('user data')
+  })
+
+  it('treats a dangling symlink as an occupied folder name', async () => {
+    const destination = await temporaryDirectory()
+    await symlink(path.join(destination, 'missing'), path.join(destination, 'Importer-Agent'))
+    const plan = await planAgentCreation([agent('one', 'Importer Agent')], destination)
+    expect(plan.agents[0]?.folderName).toBe('Importer-Agent-2')
+  })
+
+  it('rejects a plan that escapes its confirmed destination', async () => {
+    const destination = await temporaryDirectory()
+    const input = agent('one', 'Importer Agent')
+    const plan = await planAgentCreation([input], destination)
+    plan.agents[0]!.path = path.join(destination, '..', 'outside')
+    await expect(createAgentFolders(plan, [input])).rejects.toThrow(
+      'inside the confirmed destination',
+    )
   })
 })

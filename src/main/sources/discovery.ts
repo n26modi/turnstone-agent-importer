@@ -32,30 +32,39 @@ async function exists(targetPath: string): Promise<boolean> {
   try {
     await access(targetPath)
     return true
-  } catch {
-    return false
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
   }
 }
 
-async function claudeFiles(root: string): Promise<string[]> {
+async function claudeFiles(root: string, diagnostics: Diagnostic[]): Promise<string[]> {
   const projectEntries = await readdir(root, { withFileTypes: true })
   const files: string[] = []
 
   for (const projectEntry of projectEntries) {
     if (!projectEntry.isDirectory()) continue
     const projectPath = path.join(root, projectEntry.name)
-    const entries = await readdir(projectPath, { withFileTypes: true })
-    for (const entry of entries) {
-      if (entry.isFile() && entry.name.endsWith('.jsonl')) {
-        files.push(path.join(projectPath, entry.name))
+    try {
+      const entries = await readdir(projectPath, { withFileTypes: true })
+      for (const entry of entries) {
+        if (entry.isFile() && entry.name.endsWith('.jsonl'))
+          files.push(path.join(projectPath, entry.name))
       }
+    } catch {
+      diagnostics.push({
+        level: 'warning',
+        code: 'directory-read-failed',
+        message: 'A Claude Code project directory could not be read.',
+        path: projectPath,
+      })
     }
   }
 
   return files.sort()
 }
 
-async function codexFiles(root: string): Promise<string[]> {
+async function codexFiles(root: string, diagnostics: Diagnostic[]): Promise<string[]> {
   const files: string[] = []
 
   async function walk(currentPath: string, depth: number): Promise<void> {
@@ -64,7 +73,15 @@ async function codexFiles(root: string): Promise<string[]> {
     await Promise.all(
       entries.map(async (entry) => {
         const entryPath = path.join(currentPath, entry.name)
-        if (entry.isDirectory()) await walk(entryPath, depth + 1)
+        if (entry.isDirectory())
+          await walk(entryPath, depth + 1).catch(() => {
+            diagnostics.push({
+              level: 'warning',
+              code: 'directory-read-failed',
+              message: 'A Codex history directory could not be read.',
+              path: entryPath,
+            })
+          })
         if (entry.isFile() && /^rollout-.*\.jsonl$/.test(entry.name)) files.push(entryPath)
       }),
     )
@@ -110,18 +127,18 @@ async function scanClaude(root: string): Promise<{
   conversations: NormalizedConversation[]
   diagnostics: Diagnostic[]
 }> {
-  if (!(await exists(root))) {
-    return {
-      source: sourceSummary('claude-code', root, 'missing', [], []),
-      conversations: [],
-      diagnostics: [],
-    }
-  }
-
   try {
-    const files = await claudeFiles(root)
+    if (!(await exists(root))) {
+      return {
+        source: sourceSummary('claude-code', root, 'missing', [], []),
+        conversations: [],
+        diagnostics: [],
+      }
+    }
+
     const conversations: NormalizedConversation[] = []
     const diagnostics: Diagnostic[] = []
+    const files = await claudeFiles(root, diagnostics)
 
     for (const file of files) {
       try {
@@ -138,7 +155,7 @@ async function scanClaude(root: string): Promise<{
       }
     }
 
-    const status = files.length === 0 || conversations.length === 0 ? 'empty' : 'found'
+    const status = conversations.length > 0 ? 'found' : diagnostics.length > 0 ? 'error' : 'empty'
     return {
       source: sourceSummary('claude-code', root, status, conversations, diagnostics),
       conversations,
@@ -167,18 +184,30 @@ async function scanCodex(
   conversations: NormalizedConversation[]
   diagnostics: Diagnostic[]
 }> {
-  if (!(await exists(root))) {
-    return {
-      source: sourceSummary('codex', root, 'missing', [], []),
-      conversations: [],
-      diagnostics: [],
-    }
-  }
-
   try {
-    const [files, titles] = await Promise.all([codexFiles(root), codexTitles(indexPath)])
+    if (!(await exists(root))) {
+      return {
+        source: sourceSummary('codex', root, 'missing', [], []),
+        conversations: [],
+        diagnostics: [],
+      }
+    }
+
     const conversations: NormalizedConversation[] = []
     const diagnostics: Diagnostic[] = []
+    const [files, titles] = await Promise.all([
+      codexFiles(root, diagnostics),
+      codexTitles(indexPath).catch(() => {
+        diagnostics.push({
+          level: 'warning',
+          code: 'index-read-failed',
+          message:
+            'Codex conversation titles could not be read; titles were derived from the sessions.',
+          path: indexPath,
+        })
+        return new Map<string, string>()
+      }),
+    ])
 
     for (const file of files) {
       try {
@@ -197,7 +226,7 @@ async function scanCodex(
       }
     }
 
-    const status = files.length === 0 || conversations.length === 0 ? 'empty' : 'found'
+    const status = conversations.length > 0 ? 'found' : diagnostics.length > 0 ? 'error' : 'empty'
     return {
       source: sourceSummary('codex', root, status, conversations, diagnostics),
       conversations,

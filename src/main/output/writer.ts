@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, rename, rm, rmdir, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, rename, rm, rmdir, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import {
@@ -35,10 +35,11 @@ export function sanitizeFolderName(name: string): string {
 
 async function exists(target: string): Promise<boolean> {
   try {
-    await access(target)
+    await lstat(target)
     return true
-  } catch {
-    return false
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
   }
 }
 
@@ -47,6 +48,8 @@ export async function planAgentCreation(
   destination: string,
 ): Promise<CreationPlan> {
   const agents = rawAgents.map((agent) => AgentSuggestionSchema.parse(agent))
+  if (new Set(agents.map((agent) => agent.id)).size !== agents.length)
+    throw new Error('Each Agent must have a unique ID.')
   const resolvedDestination = path.resolve(destination)
   const reserved = new Set<string>()
   const planned = []
@@ -98,10 +101,11 @@ async function writeAgent(
       await writeFile(path.join(stagingPath, file.name), file.content, {
         encoding: 'utf8',
         flag: 'wx',
+        mode: 0o600,
       })
     }
 
-    await mkdir(plan.path)
+    await mkdir(plan.path, { mode: 0o700 })
     reservedTarget = true
     for (const file of agent.brainFiles) {
       await rename(path.join(stagingPath, file.name), path.join(plan.path, file.name))
@@ -118,15 +122,20 @@ async function writeAgent(
       error: null,
     }
   } catch (error) {
-    if (stagingPath) await rm(stagingPath, { recursive: true, force: true })
-    if (reservedTarget) await rm(plan.path, { recursive: true, force: true })
+    const cleanup = await Promise.allSettled([
+      ...(stagingPath ? [rm(stagingPath, { recursive: true, force: true })] : []),
+      ...(reservedTarget ? [rm(plan.path, { recursive: true, force: true })] : []),
+    ])
+    const cleanupNote = cleanup.some((result) => result.status === 'rejected')
+      ? ' Incomplete files could not be removed; inspect the destination before retrying.'
+      : ''
     return {
       agentId: agent.id,
       folderName: plan.folderName,
       path: plan.path,
       files: [],
       status: 'error',
-      error: error instanceof Error ? error.message : 'Could not create this Agent.',
+      error: `${error instanceof Error ? error.message : 'Could not create this Agent.'}${cleanupNote}`,
     }
   }
 }
@@ -139,7 +148,24 @@ export async function createAgentFolders(
   const agents = rawAgents.map((agent) => AgentSuggestionSchema.parse(agent))
   const agentsById = new Map(agents.map((agent) => [agent.id, agent]))
 
-  await mkdir(plan.destination, { recursive: true })
+  if (
+    agentsById.size !== agents.length ||
+    new Set(plan.agents.map((agent) => agent.agentId)).size !== plan.agents.length
+  ) {
+    throw new Error('Each Agent must have a unique ID.')
+  }
+  for (const planned of plan.agents) {
+    if (
+      planned.folderName !== path.basename(planned.folderName) ||
+      planned.folderName === '.' ||
+      planned.folderName === '..' ||
+      path.resolve(planned.path) !== path.join(path.resolve(plan.destination), planned.folderName)
+    ) {
+      throw new Error('An Agent folder must be inside the confirmed destination.')
+    }
+  }
+
+  await mkdir(plan.destination, { recursive: true, mode: 0o700 })
   const generated: GeneratedAgent[] = []
   for (const plannedAgent of plan.agents) {
     const agent = agentsById.get(plannedAgent.agentId)

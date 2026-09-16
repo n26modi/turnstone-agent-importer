@@ -72,4 +72,20 @@ describe('scanHistories', () => {
       'Indexed research title',
     )
   })
+
+  it('keeps readable Codex sessions when its optional title index is unreadable', async () => {
+    const sourceRoots = await roots()
+    await mkdir(sourceRoots.codexSessions, { recursive: true })
+    await mkdir(sourceRoots.codexSessionIndex, { recursive: true })
+    await copyFile(
+      path.resolve('tests/fixtures/codex/rollout.jsonl'),
+      path.join(sourceRoots.codexSessions, 'rollout-example.jsonl'),
+    )
+    const result = await scanHistories(sourceRoots)
+    expect(result.conversations).toHaveLength(1)
+    expect(result.sources.find((source) => source.provider === 'codex')?.status).toBe('found')
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'index-read-failed' })]),
+    )
+  })
 })

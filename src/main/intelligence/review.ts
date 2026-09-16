@@ -9,7 +9,7 @@ import {
   type NormalizedConversation,
 } from '../../shared/schemas'
 import { deterministicBrain } from './fallback'
-import { modelFromEnvironment } from './model'
+import { modelFromEnvironment, type IntelligenceModel } from './model'
 import { prepareConversations } from './preparation'
 
 export async function mergeAgentSuggestions(
@@ -17,6 +17,7 @@ export async function mergeAgentSuggestions(
   rawSecond: AgentSuggestion,
   analysis: AnalysisResult,
   conversations: NormalizedConversation[],
+  options: { model?: IntelligenceModel | null } = {},
 ): Promise<MergeResult> {
   const first = AgentSuggestionSchema.parse(rawFirst)
   const second = AgentSuggestionSchema.parse(rawSecond)
@@ -39,7 +40,7 @@ export async function mergeAgentSuggestions(
     .digest('hex')
     .slice(0, 12)
   const base = AgentSuggestionSchema.omit({ brainFiles: true }).parse({ ...proposal, id, evidence })
-  const model = modelFromEnvironment()
+  const model = options.model === undefined ? modelFromEnvironment() : options.model
 
   if (model) {
     try {

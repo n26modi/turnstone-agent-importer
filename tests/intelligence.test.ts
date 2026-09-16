@@ -80,6 +80,38 @@ describe('conversation preparation', () => {
       prepared.excerpts.reduce((total, excerpt) => total + excerpt.text.length, 0),
     ).toBeLessThanOrEqual(6_500)
   })
+
+  it('redacts titles, bare credentials, quoted values, and private keys before model input', () => {
+    const input = conversation('secrets')
+    const key = `sk-proj-${'x'.repeat(32)}`
+    input.title = `A question about ${key}`
+    input.messages[0]!.content = [
+      {
+        type: 'text',
+        text: `${key}\napiKey: "a secret with spaces"\nAuthorization: Bearer abcdefghijklmnop\n-----BEGIN PRIVATE KEY-----\nprivate-payload\n-----END PRIVATE KEY-----`,
+      },
+    ]
+    const serialized = JSON.stringify(prepareConversation(input))
+    for (const secret of [key, 'a secret with spaces', 'abcdefghijklmnop', 'private-payload']) {
+      expect(serialized).not.toContain(secret)
+    }
+  })
+
+  it('reserves space for recent work when earlier excerpts fill the character budget', () => {
+    const input = conversation('recent')
+    input.messages = Array.from({ length: 20 }, (_, index) => ({
+      id: `message-${index}`,
+      role: 'user',
+      content: [{ type: 'text', text: `Decision ${index}: ${'important context '.repeat(300)}` }],
+      sourceReferences: [{ provider: 'codex', conversationId: input.id }],
+    }))
+    const prepared = prepareConversation(input)
+    expect(prepared.excerpts[0]?.messageId).toBe('message-0')
+    expect(prepared.excerpts.at(-1)?.messageId).toBe('message-19')
+    expect(
+      prepared.excerpts.reduce((sum, excerpt) => sum + excerpt.text.length, 0),
+    ).toBeLessThanOrEqual(6_500)
+  })
 })
 
 describe('analysis pipeline', () => {
@@ -136,6 +168,7 @@ describe('analysis pipeline', () => {
       expect.arrayContaining([expect.objectContaining({ code: 'summary-fallback' })]),
     )
     expect(result.agents[0]?.conversationIds).toHaveLength(5)
+    expect(result.agents[0]?.evidence).toHaveLength(5)
   })
 
   it('rejects malformed Brain output and recovers that Agent locally', async () => {

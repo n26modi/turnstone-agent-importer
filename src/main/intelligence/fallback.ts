@@ -197,7 +197,7 @@ export function deterministicAgents(
             ? 'Focused project'
             : 'Worth reviewing',
       conversationIds: group.map((conversation) => conversation.conversationId),
-      evidence: group.slice(0, 3).map(evidenceFor),
+      evidence: group.map(evidenceFor),
       brainFiles: brainFiles(name, purpose, group, summaries),
     }
   })

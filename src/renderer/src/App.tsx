@@ -9,6 +9,8 @@ import type {
   SetupStyle,
 } from '../../shared/schemas'
 import templeImage from './assets/temple.png'
+import AgentActions from './AgentActions'
+import ReviewDrawer, { type DrawerState } from './ReviewDrawer'
 
 type ScreenState =
   | 'ready'
@@ -22,8 +24,6 @@ type ScreenState =
   | 'complete'
   | 'error'
 
-type DrawerState = { type: 'evidence' | 'brain'; agent: AgentSuggestion } | null
-
 const sourceName = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
@@ -36,18 +36,25 @@ const analysisSteps: Array<{ step: AnalysisProgress['step']; label: string }> = 
   { step: 'synthesizing', label: 'Writing evidence-backed Brains' },
 ]
 
-const screenLabel: Record<ScreenState, string> = {
-  ready: 'Import',
-  scanning: 'Import',
-  found: 'Import',
-  setup: 'Setup',
-  analyzing: 'Analysis',
-  suggestions: 'Review',
-  confirming: 'Confirm',
-  creating: 'Create',
-  complete: 'Complete',
-  error: 'Recovery',
+const journeySteps = ['Import', 'Setup', 'Analyze', 'Review', 'Create']
+const journeyIndex: Record<ScreenState, number> = {
+  ready: 0,
+  scanning: 0,
+  found: 0,
+  setup: 1,
+  analyzing: 2,
+  suggestions: 3,
+  confirming: 4,
+  creating: 4,
+  complete: 4,
+  error: 0,
 }
+
+const confidenceExplanation = {
+  'Strong pattern': 'A recurring theme supported by several conversations.',
+  'Focused project': 'A coherent project with a clear scope.',
+  'Worth reviewing': 'A tentative grouping. Check the sources and scope before keeping it.',
+} as const
 
 function sourceSummary(source: ImportResult['sources'][number]): string {
   if (source.status === 'found') {
@@ -76,116 +83,10 @@ function renameAgent(agent: AgentSuggestion, name: string): AgentSuggestion {
     name: trimmed,
     brainFiles: agent.brainFiles.map((file) =>
       file.name === 'README.md'
-        ? { ...file, content: file.content.replace(/^# .+$/m, `# ${trimmed}`) }
+        ? { ...file, content: file.content.replace(/^# .+$/m, () => `# ${trimmed}`) }
         : file,
     ),
   }
-}
-
-function MarkdownPreview({ content }: { content: string }): React.JSX.Element {
-  return (
-    <div className="markdown-preview">
-      {content.split('\n').map((line, index) => {
-        const key = `${index}-${line.slice(0, 12)}`
-        if (line.startsWith('### ')) return <h4 key={key}>{line.slice(4)}</h4>
-        if (line.startsWith('## ')) return <h3 key={key}>{line.slice(3)}</h3>
-        if (line.startsWith('# ')) return <h2 key={key}>{line.slice(2)}</h2>
-        if (line.startsWith('- '))
-          return (
-            <p className="markdown-list" key={key}>
-              {line.slice(2)}
-            </p>
-          )
-        if (!line.trim()) return <span className="markdown-space" key={key} />
-        return <p key={key}>{line}</p>
-      })}
-    </div>
-  )
-}
-
-function ReviewDrawer({
-  drawer,
-  onClose,
-}: {
-  drawer: NonNullable<DrawerState>
-  onClose: () => void
-}): React.JSX.Element {
-  const [activeFile, setActiveFile] = useState('README.md')
-  const closeButton = useRef<HTMLButtonElement>(null)
-
-  useEffect(() => {
-    closeButton.current?.focus()
-    const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [drawer, onClose])
-  const selectedFile =
-    drawer.agent.brainFiles.find((file) => file.name === activeFile) ?? drawer.agent.brainFiles[0]
-
-  return (
-    <div className="drawer-layer" role="presentation">
-      <button className="drawer-scrim" aria-label="Close inspector" onClick={onClose} />
-      <aside
-        className="drawer"
-        role="dialog"
-        aria-modal="true"
-        aria-label={drawer.type === 'evidence' ? 'Agent evidence' : 'Brain preview'}
-      >
-        <div className="drawer-header">
-          <div>
-            <p className="kicker">
-              {drawer.type === 'evidence' ? 'SOURCE EVIDENCE' : 'BRAIN PREVIEW'}
-            </p>
-            <h2>{drawer.agent.name}</h2>
-          </div>
-          <button
-            ref={closeButton}
-            className="icon-button"
-            aria-label="Close inspector"
-            onClick={onClose}
-          >
-            ×
-          </button>
-        </div>
-        {drawer.type === 'evidence' ? (
-          <div className="evidence-list">
-            {drawer.agent.evidence.map((evidence) => (
-              <article className="evidence-item" key={evidence.conversationId}>
-                <div className="evidence-meta">
-                  <span>{sourceName[evidence.provider]}</span>
-                  <span>
-                    {evidence.timestamp
-                      ? new Date(evidence.timestamp).toLocaleDateString()
-                      : 'Date unavailable'}
-                  </span>
-                </div>
-                <h3>{evidence.title}</h3>
-                <blockquote>“{evidence.excerpt}”</blockquote>
-                <code>{evidence.conversationId}</code>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <div className="brain-browser">
-            <nav className="file-tree" aria-label="Brain files">
-              {drawer.agent.brainFiles.map((file) => (
-                <button
-                  className={file.name === selectedFile?.name ? 'active' : ''}
-                  key={file.name}
-                  onClick={() => setActiveFile(file.name)}
-                >
-                  {file.name}
-                </button>
-              ))}
-            </nav>
-            {selectedFile && <MarkdownPreview content={selectedFile.content} />}
-          </div>
-        )}
-      </aside>
-    </div>
-  )
 }
 
 export default function App(): React.JSX.Element {
@@ -196,7 +97,9 @@ export default function App(): React.JSX.Element {
   const [error, setError] = useState('')
   const [agents, setAgents] = useState<AgentSuggestion[]>([])
   const [dismissed, setDismissed] = useState<{ agent: AgentSuggestion; index: number } | null>(null)
-  const [drawer, setDrawer] = useState<DrawerState>(null)
+  const [drawer, setDrawer] = useState<DrawerState | null>(null)
+  const [isSample, setIsSample] = useState(false)
+  const [announcement, setAnnouncement] = useState('')
   const [mergeSourceId, setMergeSourceId] = useState<string | null>(null)
   const [mergeTargetId, setMergeTargetId] = useState<string>('')
   const [busyMessage, setBusyMessage] = useState('')
@@ -204,8 +107,16 @@ export default function App(): React.JSX.Element {
   const [creationPlan, setCreationPlan] = useState<CreationPlan | null>(null)
   const [manifest, setManifest] = useState<GeneratedOutputManifest | null>(null)
   const closeDrawer = useCallback(() => setDrawer(null), [])
+  const page = useRef<HTMLDivElement>(null)
+  const undoButton = useRef<HTMLButtonElement>(null)
 
   useEffect(() => window.turnstone?.onAnalysisProgress(setProgress), [])
+  useEffect(() => {
+    if (state !== 'ready') page.current?.focus()
+  }, [state])
+  useEffect(() => {
+    if (dismissed) undoButton.current?.focus()
+  }, [dismissed])
 
   function startOver(): void {
     setState('ready')
@@ -222,6 +133,8 @@ export default function App(): React.JSX.Element {
     setOperationError('')
     setCreationPlan(null)
     setManifest(null)
+    setIsSample(false)
+    setAnnouncement('')
   }
 
   async function scan(): Promise<void> {
@@ -229,6 +142,7 @@ export default function App(): React.JSX.Element {
     setError('')
     try {
       const nextResult = await window.turnstone.scanHistories()
+      setIsSample(false)
       setResult(nextResult)
       setState('found')
     } catch {
@@ -242,6 +156,7 @@ export default function App(): React.JSX.Element {
     setError('')
     try {
       const sampleResult = await window.turnstone.loadSampleHistories()
+      setIsSample(true)
       setResult(sampleResult)
       setState('found')
     } catch {
@@ -277,12 +192,10 @@ export default function App(): React.JSX.Element {
   }
 
   function dismissAgent(agentId: string): void {
-    setAgents((current) => {
-      const index = current.findIndex((agent) => agent.id === agentId)
-      if (index < 0) return current
-      setDismissed({ agent: current[index]!, index })
-      return current.filter((agent) => agent.id !== agentId)
-    })
+    const index = agents.findIndex((agent) => agent.id === agentId)
+    if (index < 0) return
+    setDismissed({ agent: agents[index]!, index })
+    setAgents((current) => current.filter((agent) => agent.id !== agentId))
     setMergeSourceId(null)
     setOperationError('')
   }
@@ -295,6 +208,7 @@ export default function App(): React.JSX.Element {
       return next
     })
     setDismissed(null)
+    setAnnouncement(`${dismissed.agent.name} restored.`)
   }
 
   function beginMerge(agentId: string): void {
@@ -321,6 +235,9 @@ export default function App(): React.JSX.Element {
       })
       setDismissed(null)
       setMergeSourceId(null)
+      setAnnouncement(
+        `${first.name} and ${second.name} merged. ${merged.mode === 'deterministic' ? 'The combined Brain was prepared locally.' : 'The combined Brain was regenerated with OpenAI.'}`,
+      )
     } catch {
       setOperationError('We couldn’t merge those Agents. Nothing was changed.')
     } finally {
@@ -328,15 +245,23 @@ export default function App(): React.JSX.Element {
     }
   }
 
-  async function prepareCreation(): Promise<void> {
-    if (agents.length === 0) {
+  async function prepareCreation(retryFailed = false): Promise<void> {
+    const pendingAgents =
+      retryFailed && manifest
+        ? agents.filter((agent) =>
+            manifest.agents.some(
+              (output) => output.agentId === agent.id && output.status === 'error',
+            ),
+          )
+        : agents
+    if (pendingAgents.length === 0) {
       setOperationError('Keep at least one Agent before continuing.')
       return
     }
     setBusyMessage('Checking folder names…')
     setOperationError('')
     try {
-      setCreationPlan(await window.turnstone.planCreation(agents))
+      setCreationPlan(await window.turnstone.planCreation(pendingAgents))
       setState('confirming')
     } catch {
       setOperationError('We couldn’t prepare the folder plan. No files were written.')
@@ -346,12 +271,25 @@ export default function App(): React.JSX.Element {
   }
 
   async function changeDestination(): Promise<void> {
-    const destination = await window.turnstone.chooseDestination()
-    if (!destination) return
-    setBusyMessage('Updating folder plan…')
+    const pendingAgents = creationPlan
+      ? agents.filter((agent) =>
+          creationPlan.agents.some((planned) => planned.agentId === agent.id),
+        )
+      : agents.filter(
+          (agent) =>
+            !manifest?.agents.some(
+              (output) => output.agentId === agent.id && output.status === 'created',
+            ),
+        )
+    setBusyMessage('Choosing a destination…')
     setOperationError('')
     try {
-      setCreationPlan(await window.turnstone.planCreation(agents))
+      const destination = await window.turnstone.chooseDestination()
+      if (!destination) return
+      setBusyMessage('Updating folder plan…')
+      // The main process invalidates the previous plan once the destination changes.
+      setCreationPlan(null)
+      setCreationPlan(await window.turnstone.planCreation(pendingAgents))
     } catch {
       setOperationError('We couldn’t use that destination. No files were written.')
     } finally {
@@ -364,7 +302,13 @@ export default function App(): React.JSX.Element {
     setOperationError('')
     try {
       const output = await window.turnstone.createAgents()
-      setManifest(output)
+      setManifest((previous) => ({
+        ...output,
+        agents: [
+          ...(previous?.agents.filter((agent) => agent.status === 'created') ?? []),
+          ...output.agents,
+        ],
+      }))
       setState('complete')
     } catch {
       setOperationError('We couldn’t create the Agent folders. Review the plan and try again.')
@@ -372,21 +316,81 @@ export default function App(): React.JSX.Element {
     }
   }
 
-  const activeStep = progress ? analysisSteps.findIndex((item) => item.step === progress.step) : 0
+  async function revealAgents(): Promise<void> {
+    setOperationError('')
+    try {
+      await window.turnstone.revealAgents()
+    } catch {
+      setOperationError(
+        'We couldn’t open Finder. Your Agent folders are still saved at the destination shown below.',
+      )
+    }
+  }
+
+  const activeStep =
+    progress?.step === 'complete'
+      ? analysisSteps.length
+      : progress
+        ? analysisSteps.findIndex((item) => item.step === progress.step)
+        : 0
 
   const wideState = ['suggestions', 'confirming', 'creating', 'complete'].includes(state)
   const createdCount = manifest?.agents.filter((agent) => agent.status === 'created').length ?? 0
   const failedCount = manifest?.agents.filter((agent) => agent.status === 'error').length ?? 0
+  const currentJourneyStep = state === 'error' && result ? 2 : journeyIndex[state]
+  const sourceCount = new Set(agents.flatMap((agent) => agent.conversationIds)).size
 
   return (
     <main className="shell">
-      <section className={`canvas canvas--${state}`} aria-labelledby="page-title">
-        <header className="app-chrome" aria-label="Application progress">
+      <section
+        className={`canvas canvas--${state}`}
+        aria-labelledby="page-title"
+        inert={Boolean(drawer)}
+      >
+        <header className="app-chrome">
           <span className="app-wordmark">TURNSTONE</span>
-          <span className="app-step">{screenLabel[state]}</span>
+          <nav aria-label="Setup progress">
+            <ol className="journey-steps">
+              {journeySteps.map((label, index) => {
+                const complete =
+                  index < currentJourneyStep || (state === 'complete' && failedCount === 0)
+                return (
+                  <li
+                    key={label}
+                    className={
+                      complete
+                        ? 'journey-step--complete'
+                        : index === currentJourneyStep
+                          ? 'journey-step--current'
+                          : ''
+                    }
+                    aria-current={index === currentJourneyStep ? 'step' : undefined}
+                  >
+                    <span className="journey-number" aria-hidden="true">
+                      {complete ? '✓' : index + 1}
+                    </span>
+                    <span>{label}</span>
+                    <span className="sr-only">
+                      {complete
+                        ? ', complete'
+                        : index === currentJourneyStep
+                          ? ', current step'
+                          : ', upcoming'}
+                    </span>
+                  </li>
+                )
+              })}
+            </ol>
+          </nav>
         </header>
         <div className="body">
-          <div key={state} className={`content ${wideState ? 'content--wide' : ''}`}>
+          <div
+            ref={page}
+            tabIndex={-1}
+            key={state}
+            className={`content ${wideState ? 'content--wide' : ''}`}
+            aria-labelledby="page-title"
+          >
             {state === 'ready' && (
               <>
                 <p className="kicker">BUILD YOUR AGENT TEAM</p>
@@ -409,6 +413,18 @@ export default function App(): React.JSX.Element {
                   <span className="source-divider" aria-hidden="true" />
                   <span>Codex</span>
                 </div>
+                <details className="privacy-details">
+                  <summary>Your history, handled with care</summary>
+                  <p>
+                    Import reads local history without changing it. For analysis, selected excerpts
+                    and project context are sent to OpenAI after basic secret redaction. Redaction
+                    is best-effort; excerpts can still contain personal information.
+                  </p>
+                  <p>
+                    Imported history is held in memory. Only the Brain files you confirm are saved.
+                    Sample data stays local and requires no API key.
+                  </p>
+                </details>
               </>
             )}
 
@@ -434,8 +450,9 @@ export default function App(): React.JSX.Element {
                   <span>ready to organize.</span>
                 </h1>
                 <p className="lede">
-                  We found {result.conversations.length} conversation
-                  {result.conversations.length === 1 ? '' : 's'} across your local histories.
+                  {isSample ? 'Loaded' : 'We found'} {result.conversations.length} conversation
+                  {result.conversations.length === 1 ? '' : 's'}{' '}
+                  {isSample ? 'from the bundled sample.' : 'across your local histories.'}
                 </p>
                 <div className="source-results" aria-live="polite">
                   {result.sources.map((source) => (
@@ -461,9 +478,12 @@ export default function App(): React.JSX.Element {
                     Try the complete flow with sample data
                   </button>
                 )}
-                {result.sources.some((source) => source.status === 'error') && (
+                {result.sources.some(
+                  (source) => source.status === 'error' || source.diagnostics.length > 0,
+                ) && (
                   <p className="trust-note" role="status">
-                    Some history could not be read. Everything available is still ready to use.
+                    Some history needed recovery or could not be read. Everything available is still
+                    ready to use.
                   </p>
                 )}
               </>
@@ -477,8 +497,10 @@ export default function App(): React.JSX.Element {
                   <span>do you want to be?</span>
                 </h1>
                 <p className="lede">
-                  Selected excerpts will be sent to OpenAI for analysis. Both paths show you the
-                  proposed team before anything is created.
+                  {isSample
+                    ? 'Sample conversations are analyzed locally, with no API key needed.'
+                    : 'Selected excerpts will be sent to OpenAI for analysis when an API key is configured; otherwise, suggestions are prepared locally.'}{' '}
+                  Both paths show you the proposed team before anything is created.
                 </p>
                 <div className="setup-grid">
                   <button
@@ -522,6 +544,24 @@ export default function App(): React.JSX.Element {
                     )
                   })}
                 </ol>
+                {progress && (
+                  <div className="analysis-count" role="status">
+                    <progress
+                      aria-label={progress.label}
+                      value={progress.completed}
+                      max={progress.total}
+                    />
+                    <span>
+                      {progress.completed} of {progress.total}{' '}
+                      {progress.step === 'summarizing'
+                        ? 'batches'
+                        : progress.step === 'synthesizing'
+                          ? 'Brains'
+                          : 'steps'}{' '}
+                      complete
+                    </span>
+                  </div>
+                )}
               </>
             )}
 
@@ -547,17 +587,39 @@ export default function App(): React.JSX.Element {
                   {agents.map((agent) => (
                     <article className="agent-card" key={agent.id}>
                       <div className="agent-meta">
-                        <span>{agent.confidence}</span>
-                        <span>{agent.conversationIds.length} conversations</span>
+                        <span
+                          className="confidence-label"
+                          tabIndex={0}
+                          aria-label={`${agent.confidence}: ${confidenceExplanation[agent.confidence]}`}
+                        >
+                          {agent.confidence}
+                          <span className="confidence-help" role="tooltip">
+                            {confidenceExplanation[agent.confidence]}
+                          </span>
+                        </span>
+                        <span>
+                          {agent.conversationIds.length} conversation
+                          {agent.conversationIds.length === 1 ? '' : 's'}
+                        </span>
                       </div>
                       {analysis.setupStyle === 'review' ? (
                         <input
                           className="agent-name-input"
                           aria-label={`Rename ${agent.name}`}
                           defaultValue={agent.name}
-                          onBlur={(event) => updateAgentName(agent.id, event.currentTarget.value)}
+                          disabled={Boolean(busyMessage)}
+                          maxLength={120}
+                          onBlur={(event) => {
+                            const name = event.currentTarget.value.trim() || agent.name
+                            event.currentTarget.value = name
+                            updateAgentName(agent.id, name)
+                          }}
                           onKeyDown={(event) => {
                             if (event.key === 'Enter') event.currentTarget.blur()
+                            if (event.key === 'Escape') {
+                              event.currentTarget.value = agent.name
+                              event.currentTarget.blur()
+                            }
                           }}
                         />
                       ) : (
@@ -571,19 +633,32 @@ export default function App(): React.JSX.Element {
                       </div>
                       {agent.evidence[0] && <blockquote>“{agent.evidence[0].excerpt}”</blockquote>}
                       <div className="agent-actions">
-                        <button onClick={() => setDrawer({ type: 'evidence', agent })}>
+                        <button
+                          className="brain-preview-action"
+                          disabled={Boolean(busyMessage)}
+                          onClick={(event) =>
+                            setDrawer({ type: 'brain', agent, returnFocus: event.currentTarget })
+                          }
+                        >
+                          Brain preview <span aria-hidden="true">↗</span>
+                        </button>
+                        <button
+                          className="evidence-action"
+                          disabled={Boolean(busyMessage)}
+                          onClick={(event) =>
+                            setDrawer({ type: 'evidence', agent, returnFocus: event.currentTarget })
+                          }
+                        >
                           Evidence
                         </button>
-                        <button onClick={() => setDrawer({ type: 'brain', agent })}>
-                          Brain preview
-                        </button>
-                        {analysis.setupStyle === 'review' && agents.length > 1 && (
-                          <button onClick={() => beginMerge(agent.id)}>Merge</button>
-                        )}
                         {analysis.setupStyle === 'review' && (
-                          <button className="danger-action" onClick={() => dismissAgent(agent.id)}>
-                            Dismiss
-                          </button>
+                          <AgentActions
+                            name={agent.name}
+                            disabled={Boolean(busyMessage)}
+                            canMerge={agents.length > 1}
+                            onMerge={() => beginMerge(agent.id)}
+                            onDismiss={() => dismissAgent(agent.id)}
+                          />
                         )}
                       </div>
                       {mergeSourceId === agent.id && (
@@ -592,6 +667,7 @@ export default function App(): React.JSX.Element {
                           <select
                             id={`merge-${agent.id}`}
                             value={mergeTargetId}
+                            disabled={Boolean(busyMessage)}
                             onChange={(event) => setMergeTargetId(event.currentTarget.value)}
                           >
                             {agents
@@ -608,7 +684,12 @@ export default function App(): React.JSX.Element {
                           >
                             Combine
                           </button>
-                          <button onClick={() => setMergeSourceId(null)}>Cancel</button>
+                          <button
+                            disabled={Boolean(busyMessage)}
+                            onClick={() => setMergeSourceId(null)}
+                          >
+                            Cancel
+                          </button>
                         </div>
                       )}
                     </article>
@@ -627,7 +708,9 @@ export default function App(): React.JSX.Element {
                 {dismissed && (
                   <div className="undo-bar" role="status">
                     <span>{dismissed.agent.name} dismissed.</span>
-                    <button onClick={undoDismiss}>Undo</button>
+                    <button ref={undoButton} disabled={Boolean(busyMessage)} onClick={undoDismiss}>
+                      Undo
+                    </button>
                   </div>
                 )}
                 {busyMessage && (
@@ -642,9 +725,12 @@ export default function App(): React.JSX.Element {
                 )}
                 <footer className="review-footer">
                   <p>
-                    {analysis.setupStyle === 'review'
-                      ? 'Shape the team, then review the exact folders.'
-                      : 'Review the evidence, then confirm the exact folders.'}
+                    <strong className="review-summary">
+                      {agents.length} Agent{agents.length === 1 ? '' : 's'} ·{' '}
+                      {agents.reduce((total, agent) => total + agent.brainFiles.length, 0)} files ·{' '}
+                      {sourceCount} source conversation{sourceCount === 1 ? '' : 's'}
+                    </strong>
+                    Review the exact folders before anything is created.
                   </p>
                   <button
                     className="primary"
@@ -657,7 +743,7 @@ export default function App(): React.JSX.Element {
               </>
             )}
 
-            {state === 'confirming' && creationPlan && (
+            {state === 'confirming' && (
               <>
                 <div className="suggestion-heading">
                   <div>
@@ -674,28 +760,34 @@ export default function App(): React.JSX.Element {
                     Change destination
                   </button>
                 </div>
-                <div className="destination-panel">
-                  <p>Destination</p>
-                  <code>{creationPlan.destination}</code>
-                </div>
-                <div className="creation-list">
-                  {creationPlan.agents.map((plannedAgent) => (
-                    <article className="creation-row" key={plannedAgent.agentId}>
-                      <div>
-                        <h2>{plannedAgent.folderName}</h2>
-                        <p>{plannedAgent.name}</p>
-                      </div>
-                      <div className="file-manifest">
-                        {plannedAgent.files.map((file) => (
-                          <span key={file}>{file}</span>
-                        ))}
-                      </div>
-                      {plannedAgent.collisionResolved && (
-                        <span className="collision-note">Renamed to avoid an existing folder</span>
-                      )}
-                    </article>
-                  ))}
-                </div>
+                {creationPlan && (
+                  <>
+                    <div className="destination-panel">
+                      <p>Destination</p>
+                      <code>{creationPlan.destination}</code>
+                    </div>
+                    <div className="creation-list">
+                      {creationPlan.agents.map((plannedAgent) => (
+                        <article className="creation-row" key={plannedAgent.agentId}>
+                          <div>
+                            <h2>{plannedAgent.folderName}</h2>
+                            <p>{plannedAgent.name}</p>
+                          </div>
+                          <div className="file-manifest">
+                            {plannedAgent.files.map((file) => (
+                              <span key={file}>{file}</span>
+                            ))}
+                          </div>
+                          {plannedAgent.collisionResolved && (
+                            <span className="collision-note">
+                              Renamed to avoid an existing folder
+                            </span>
+                          )}
+                        </article>
+                      ))}
+                    </div>
+                  </>
+                )}
                 {busyMessage && (
                   <p className="operation-status" role="status">
                     {busyMessage}
@@ -707,12 +799,28 @@ export default function App(): React.JSX.Element {
                   </p>
                 )}
                 <footer className="review-footer">
-                  <button className="secondary-button" onClick={() => setState('suggestions')}>
+                  <button
+                    className="secondary-button"
+                    disabled={Boolean(busyMessage)}
+                    onClick={() => {
+                      setOperationError('')
+                      setAgents((current) =>
+                        current.filter(
+                          (agent) =>
+                            !manifest?.agents.some(
+                              (output) =>
+                                output.agentId === agent.id && output.status === 'created',
+                            ),
+                        ),
+                      )
+                      setState('suggestions')
+                    }}
+                  >
                     Back to Agents
                   </button>
                   <button
                     className="primary"
-                    disabled={Boolean(busyMessage)}
+                    disabled={Boolean(busyMessage) || !creationPlan}
                     onClick={() => void createAgents()}
                   >
                     Create Agent folders
@@ -770,22 +878,46 @@ export default function App(): React.JSX.Element {
                 </div>
                 <div className="completion-actions">
                   {createdCount > 0 && (
-                    <button
-                      className="primary"
-                      onClick={() => void window.turnstone.revealAgents()}
-                    >
+                    <button className="primary" onClick={() => void revealAgents()}>
                       Reveal in Finder
                     </button>
                   )}
                   {failedCount > 0 && (
-                    <button className="secondary-button" onClick={() => void prepareCreation()}>
+                    <button
+                      className="secondary-button"
+                      disabled={Boolean(busyMessage)}
+                      onClick={() => void prepareCreation(true)}
+                    >
                       Review folder plan
                     </button>
                   )}
-                  <button className="text-button" onClick={startOver}>
+                  <button
+                    className="text-button"
+                    disabled={Boolean(busyMessage)}
+                    onClick={startOver}
+                  >
                     Start over
                   </button>
                 </div>
+                {busyMessage && (
+                  <p className="operation-status" role="status">
+                    {busyMessage}
+                  </p>
+                )}
+                {operationError && (
+                  <p className="operation-error" role="alert">
+                    {operationError}
+                  </p>
+                )}
+                {createdCount > 0 && (
+                  <p className="completion-destination">
+                    Saved folders:{' '}
+                    {manifest.agents
+                      .filter((agent) => agent.status === 'created')
+                      .map((agent) => agent.path)
+                      .join(' · ')}
+                  </p>
+                )}
               </>
             )}
 
@@ -812,8 +944,11 @@ export default function App(): React.JSX.Element {
             </figure>
           )}
         </div>
-        {drawer && <ReviewDrawer drawer={drawer} onClose={closeDrawer} />}
+        <div className="sr-only" role="status">
+          {announcement}
+        </div>
       </section>
+      {drawer && <ReviewDrawer drawer={drawer} onClose={closeDrawer} />}
     </main>
   )
 }

@@ -54,10 +54,17 @@ function validateAgentReferences(
   summaries: ConversationSummary[],
 ): AgentProposal[] {
   const valid = new Set(summaries.map((summary) => summary.conversationId))
+  const seenAgents = new Set<string>()
   for (const agent of agents) {
-    if (agent.conversationIds.some((id) => !valid.has(id))) {
+    const id = suggestionId(agent)
+    if (
+      agent.conversationIds.some((id) => !valid.has(id)) ||
+      new Set(agent.conversationIds).size !== agent.conversationIds.length ||
+      seenAgents.has(id)
+    ) {
       throw new Error('Agent output referenced a conversation that was not supplied.')
     }
+    seenAgents.add(id)
   }
   return agents
 }
@@ -65,7 +72,6 @@ function validateAgentReferences(
 function evidenceFor(agent: AgentProposal, prepared: PreparedConversation[]): AgentEvidence[] {
   return prepared
     .filter((conversation) => agent.conversationIds.includes(conversation.conversationId))
-    .slice(0, 3)
     .map((conversation) => {
       const excerpt =
         conversation.excerpts.find((item) => item.role === 'user') ?? conversation.excerpts[0]

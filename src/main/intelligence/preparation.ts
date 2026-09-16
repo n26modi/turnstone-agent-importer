@@ -14,16 +14,28 @@ const generatedPrefixes = [
 const signalPattern =
   /\b(decid|because|require|prefer|must|should|blocked|error|fix|implement|build|next|todo|question|architecture|workflow)\w*/i
 
-function messageText(message: NormalizedMessage): string {
-  return message.content
-    .flatMap((block) => (block.type === 'text' ? [block.text] : []))
-    .join('\n\n')
+export function redactSecrets(text: string): string {
+  return text
     .replace(
-      /-----BEGIN [A-Z ]+ PRIVATE KEY-----[\s\S]*?-----END [A-Z ]+ PRIVATE KEY-----/g,
+      /-----BEGIN ((?:[A-Z0-9]+ )?PRIVATE KEY)-----[\s\S]*?(?:-----END \1-----|$)/g,
       '[private key removed]',
     )
-    .replace(/\b([A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD))\s*=\s*\S+/g, '$1=[secret removed]')
+    .replace(
+      /((?:["']?)[\w-]*(?:api[_-]?key|token|secret|password)[\w-]*["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)/gi,
+      '$1[secret removed]',
+    )
+    .replace(
+      /\b(?:sk-[a-zA-Z0-9_-]{16,}|gh[oprsu]_[a-zA-Z0-9]{16,}|github_pat_[a-zA-Z0-9_]{16,}|xox[baprs]-[a-zA-Z0-9-]{10,})\b/g,
+      '[secret removed]',
+    )
+    .replace(/\bBearer\s+[a-zA-Z0-9._~+/-]{8,}={0,2}/gi, 'Bearer [secret removed]')
     .trim()
+}
+
+function messageText(message: NormalizedMessage): string {
+  return redactSecrets(
+    message.content.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('\n\n'),
+  )
 }
 
 function excerptScore(
@@ -61,30 +73,32 @@ export function prepareConversation(conversation: NormalizedConversation): Prepa
   }
 
   let usedCharacters = 0
-  const excerpts = candidates
+  const selected = candidates
     .filter((candidate) => selectedIndexes.has(candidate.index))
     .sort((a, b) => a.index - b.index)
-    .flatMap(({ message, text }) => {
-      const remaining = MAX_CONVERSATION_CHARACTERS - usedCharacters
-      if (remaining <= 0) return []
-      const excerpt = text.slice(0, Math.min(MAX_EXCERPT_CHARACTERS, remaining)).trim()
-      if (!excerpt) return []
-      usedCharacters += excerpt.length
-      return [
-        {
-          messageId: message.id,
-          role: message.role,
-          text: excerpt,
-          sourceReferences: message.sourceReferences,
-        },
-      ]
-    })
+  const excerpts = selected.flatMap(({ message, text }, index) => {
+    const remaining = MAX_CONVERSATION_CHARACTERS - usedCharacters
+    if (remaining <= 0) return []
+    // Reserve room for every selected excerpt, including recent unresolved work.
+    const fairShare = Math.floor(remaining / (selected.length - index))
+    const excerpt = text.slice(0, Math.min(MAX_EXCERPT_CHARACTERS, fairShare)).trim()
+    if (!excerpt) return []
+    usedCharacters += excerpt.length
+    return [
+      {
+        messageId: message.id,
+        role: message.role,
+        text: excerpt,
+        sourceReferences: message.sourceReferences,
+      },
+    ]
+  })
 
   return {
     conversationId: conversation.id,
     provider: conversation.provider,
-    title: conversation.title,
-    project: conversation.project ?? null,
+    title: redactSecrets(conversation.title),
+    project: conversation.project ? redactSecrets(conversation.project) : null,
     startedAt: conversation.startedAt ?? null,
     excerpts,
   }
