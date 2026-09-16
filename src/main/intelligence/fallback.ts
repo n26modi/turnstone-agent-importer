@@ -13,13 +13,17 @@ const stopWords = new Set([
   'again',
   'also',
   'been',
+  'before',
   'being',
   'build',
   'could',
+  'each',
+  'every',
   'from',
   'have',
   'into',
   'just',
+  'keep',
   'like',
   'more',
   'need',
@@ -72,27 +76,42 @@ function topics(conversations: PreparedConversation[]): string[] {
 }
 
 export function deterministicSummary(conversation: PreparedConversation): ConversationSummary {
+  // Extract the matching sentence, not the first sentence of a matching message.
+  // This is deliberately conservative: local drafts quote the supplied excerpts.
+  const sentences = (text: string) =>
+    text
+      .split(/(?<=[.!?])\s+/)
+      .map((item) => item.trim())
+      .filter(Boolean)
   const userTexts = conversation.excerpts
     .filter((excerpt) => excerpt.role === 'user')
-    .map((item) => item.text)
+    .flatMap((item) => sentences(item.text))
   const assistantTexts = conversation.excerpts
     .filter((excerpt) => excerpt.role === 'assistant')
-    .map((item) => item.text)
-  const allText = conversation.excerpts.map((item) => item.text)
+    .flatMap((item) => sentences(item.text))
+  const allText = conversation.excerpts.flatMap((item) => sentences(item.text))
+  const statements = allText.filter((text) => !text.endsWith('?'))
 
   return {
     conversationId: conversation.conversationId,
     project: conversation.project,
     goals: userTexts.slice(0, 2).map((text) => sentence(text)),
-    durableFacts: allText
+    durableFacts: statements
       .filter((text) => /\b(is|uses|has|contains|runs|located)\b/i.test(text))
       .slice(0, 3)
       .map((text) => sentence(text)),
-    decisions: allText
+    decisions: statements
       .filter((text) => /\b(decid|chosen|will use|must|should)\w*/i.test(text))
       .slice(0, 3)
       .map((text) => sentence(text)),
-    toolsAndWorkflows: topics([conversation]),
+    toolsAndWorkflows: statements
+      .filter((text) =>
+        /\b(workflow|pipeline|use|validate|test|seed|compare|track|review|export|separate)\w*/i.test(
+          text,
+        ),
+      )
+      .slice(0, 3)
+      .map((text) => sentence(text)),
     preferences: userTexts
       .filter((text) => /\b(prefer|want|avoid|like)\w*/i.test(text))
       .slice(0, 3)
@@ -134,29 +153,33 @@ function brainFiles(
   const relevant = summaries.filter((summary) =>
     group.some((item) => item.conversationId === summary.conversationId),
   )
-  const section = (items: string[]) =>
-    items.length ? items.map((item) => `- ${item}`).join('\n') : '- Nothing durable identified yet.'
+  const section = (select: (summary: ConversationSummary) => string[], limit = 12) => {
+    const items = relevant
+      .flatMap((summary) => select(summary).map((text) => `- ${text} (${summary.conversationId})`))
+      .slice(0, limit)
+    return items.length ? items.join('\n') : '- Nothing durable identified yet.'
+  }
 
   return [
     {
       name: 'README.md',
-      content: `# ${name}\n\n${purpose}\n\n## Responsibilities\n${section(relevant.flatMap((item) => item.candidateResponsibilities).slice(0, 8))}\n\n## Sources\n${citations}`,
+      content: `# ${name}\n\n${purpose}\n\n## Responsibilities\n${section((item) => item.candidateResponsibilities, 8)}\n\n## Sources\n${citations}`,
     },
     {
       name: 'context.md',
-      content: `# Context\n\n${section(relevant.flatMap((item) => item.durableFacts).slice(0, 12))}\n\n## Sources\n${citations}`,
+      content: `# Context\n\n${section((item) => item.durableFacts)}\n\n## Sources\n${citations}`,
     },
     {
       name: 'patterns.md',
-      content: `# Patterns\n\n${section(relevant.flatMap((item) => [...item.toolsAndWorkflows, ...item.preferences]).slice(0, 12))}\n\n## Sources\n${citations}`,
+      content: `# Patterns\n\n${section((item) => [...item.toolsAndWorkflows, ...item.preferences])}\n\n## Sources\n${citations}`,
     },
     {
       name: 'key-decisions.md',
-      content: `# Key decisions\n\n${section(relevant.flatMap((item) => item.decisions).slice(0, 12))}\n\n## Sources\n${citations}`,
+      content: `# Key decisions\n\n${section((item) => item.decisions)}\n\n## Sources\n${citations}`,
     },
     {
       name: 'open-questions.md',
-      content: `# Open questions\n\n${section(relevant.flatMap((item) => item.unresolvedQuestions).slice(0, 12))}\n\n## Sources\n${citations}`,
+      content: `# Open questions\n\n${section((item) => item.unresolvedQuestions)}\n\n## Sources\n${citations}`,
     },
   ]
 }
@@ -183,10 +206,17 @@ export function deterministicAgents(
 
   return selected.map(([groupName, group]) => {
     const groupTopics = topics(group)
-    const name = groupName.endsWith('Agent') ? groupName : `${groupName} Agent`
-    const purpose = `Keep the context, decisions, and recurring workflows for ${groupName}.`
+    const displayName = groupName
+      .replace(/[-_]+/g, ' ')
+      .replace(/\b[a-z]/g, (letter) => letter.toUpperCase())
+    const name = /\bAgent$/i.test(displayName) ? displayName : `${displayName} Agent`
+    const goal = summaries.find((summary) =>
+      group.some((item) => item.conversationId === summary.conversationId),
+    )?.goals[0]
+    const purpose =
+      goal || `Keep the context, decisions, and recurring workflows for ${displayName}.`
     return {
-      id: agentId(name),
+      id: agentId(groupName),
       name,
       purpose,
       topics: groupTopics,

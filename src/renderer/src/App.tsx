@@ -96,7 +96,10 @@ export default function App(): React.JSX.Element {
   const [progress, setProgress] = useState<AnalysisProgress | null>(null)
   const [error, setError] = useState('')
   const [agents, setAgents] = useState<AgentSuggestion[]>([])
-  const [dismissed, setDismissed] = useState<{ agent: AgentSuggestion; index: number } | null>(null)
+  const [dismissed, setDismissed] = useState<Array<{ agent: AgentSuggestion; index: number }>>([])
+  const [renaming, setRenaming] = useState<{ agentId: string; returnFocus: HTMLElement } | null>(
+    null,
+  )
   const [drawer, setDrawer] = useState<DrawerState | null>(null)
   const [isSample, setIsSample] = useState(false)
   const [announcement, setAnnouncement] = useState('')
@@ -109,14 +112,26 @@ export default function App(): React.JSX.Element {
   const closeDrawer = useCallback(() => setDrawer(null), [])
   const page = useRef<HTMLDivElement>(null)
   const undoButton = useRef<HTMLButtonElement>(null)
+  const nameInput = useRef<HTMLInputElement>(null)
+  const restoredAgentId = useRef<string | null>(null)
 
   useEffect(() => window.turnstone?.onAnalysisProgress(setProgress), [])
   useEffect(() => {
     if (state !== 'ready') page.current?.focus()
   }, [state])
   useEffect(() => {
-    if (dismissed) undoButton.current?.focus()
+    if (dismissed.length > 0) undoButton.current?.focus()
+    else if (restoredAgentId.current) {
+      document.getElementById(`agent-heading-${restoredAgentId.current}`)?.focus()
+    }
+    restoredAgentId.current = null
   }, [dismissed])
+  useEffect(() => {
+    if (renaming) {
+      nameInput.current?.focus()
+      nameInput.current?.select()
+    }
+  }, [renaming])
 
   function startOver(): void {
     setState('ready')
@@ -125,7 +140,9 @@ export default function App(): React.JSX.Element {
     setProgress(null)
     setError('')
     setAgents([])
-    setDismissed(null)
+    setDismissed([])
+    setRenaming(null)
+    restoredAgentId.current = null
     setDrawer(null)
     setMergeSourceId(null)
     setMergeTargetId('')
@@ -194,21 +211,23 @@ export default function App(): React.JSX.Element {
   function dismissAgent(agentId: string): void {
     const index = agents.findIndex((agent) => agent.id === agentId)
     if (index < 0) return
-    setDismissed({ agent: agents[index]!, index })
+    setDismissed((current) => [...current, { agent: agents[index]!, index }])
     setAgents((current) => current.filter((agent) => agent.id !== agentId))
     setMergeSourceId(null)
     setOperationError('')
   }
 
   function undoDismiss(): void {
-    if (!dismissed) return
+    const latest = dismissed.at(-1)
+    if (!latest) return
     setAgents((current) => {
       const next = [...current]
-      next.splice(Math.min(dismissed.index, next.length), 0, dismissed.agent)
+      next.splice(Math.min(latest.index, next.length), 0, latest.agent)
       return next
     })
-    setDismissed(null)
-    setAnnouncement(`${dismissed.agent.name} restored.`)
+    restoredAgentId.current = latest.agent.id
+    setDismissed((current) => current.slice(0, -1))
+    setAnnouncement(`${latest.agent.name} restored.`)
   }
 
   function beginMerge(agentId: string): void {
@@ -233,7 +252,6 @@ export default function App(): React.JSX.Element {
         next.splice(Math.min(firstIndex, secondIndex), 0, merged.agent)
         return next
       })
-      setDismissed(null)
       setMergeSourceId(null)
       setAnnouncement(
         `${first.name} and ${second.name} merged. ${merged.mode === 'deterministic' ? 'The combined Brain was prepared locally.' : 'The combined Brain was regenerated with OpenAI.'}`,
@@ -339,6 +357,7 @@ export default function App(): React.JSX.Element {
   const failedCount = manifest?.agents.filter((agent) => agent.status === 'error').length ?? 0
   const currentJourneyStep = state === 'error' && result ? 2 : journeyIndex[state]
   const sourceCount = new Set(agents.flatMap((agent) => agent.conversationIds)).size
+  const lastDismissed = dismissed.at(-1)
 
   return (
     <main className="shell">
@@ -576,11 +595,13 @@ export default function App(): React.JSX.Element {
                     </h1>
                   </div>
                   <p className="analysis-mode">
-                    {analysis.mode === 'openai'
-                      ? 'Analyzed with OpenAI'
-                      : analysis.mode === 'mixed'
-                        ? 'OpenAI analysis with local recovery'
-                        : 'Prepared locally'}
+                    {isSample
+                      ? 'Sample team · Prepared locally'
+                      : analysis.mode === 'openai'
+                        ? 'Analyzed with OpenAI'
+                        : analysis.mode === 'mixed'
+                          ? 'OpenAI analysis with local recovery'
+                          : 'Prepared locally'}
                   </p>
                 </div>
                 <div className="agent-grid">
@@ -602,29 +623,40 @@ export default function App(): React.JSX.Element {
                           {agent.conversationIds.length === 1 ? '' : 's'}
                         </span>
                       </div>
-                      {analysis.setupStyle === 'review' ? (
-                        <input
-                          className="agent-name-input"
-                          aria-label={`Rename ${agent.name}`}
-                          defaultValue={agent.name}
-                          disabled={Boolean(busyMessage)}
-                          maxLength={120}
-                          onBlur={(event) => {
-                            const name = event.currentTarget.value.trim() || agent.name
-                            event.currentTarget.value = name
-                            updateAgentName(agent.id, name)
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter') event.currentTarget.blur()
-                            if (event.key === 'Escape') {
-                              event.currentTarget.value = agent.name
-                              event.currentTarget.blur()
-                            }
-                          }}
-                        />
+                      {renaming?.agentId === agent.id ? (
+                        <div>
+                          <input
+                            ref={nameInput}
+                            className="agent-name-input"
+                            aria-label={`Rename ${agent.name}`}
+                            aria-describedby={`rename-help-${agent.id}`}
+                            defaultValue={agent.name}
+                            disabled={Boolean(busyMessage)}
+                            maxLength={120}
+                            onBlur={(event) => {
+                              const name = event.currentTarget.value.trim() || agent.name
+                              updateAgentName(agent.id, name)
+                              setRenaming(null)
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === 'Escape') {
+                                event.preventDefault()
+                                if (event.key === 'Escape') event.currentTarget.value = agent.name
+                                event.currentTarget.blur()
+                                renaming.returnFocus.focus()
+                              }
+                            }}
+                          />
+                          <p className="rename-help" id={`rename-help-${agent.id}`}>
+                            Enter to save · Esc to cancel
+                          </p>
+                        </div>
                       ) : (
-                        <h2>{agent.name}</h2>
+                        <h2 id={`agent-heading-${agent.id}`} tabIndex={-1}>
+                          {agent.name}
+                        </h2>
                       )}
+                      <p className="agent-purpose-label">Can help with</p>
                       <p className="agent-purpose">{agent.purpose}</p>
                       <div className="topic-list">
                         {agent.topics.map((topic) => (
@@ -656,6 +688,9 @@ export default function App(): React.JSX.Element {
                             name={agent.name}
                             disabled={Boolean(busyMessage)}
                             canMerge={agents.length > 1}
+                            onRename={(returnFocus) =>
+                              setRenaming({ agentId: agent.id, returnFocus })
+                            }
                             onMerge={() => beginMerge(agent.id)}
                             onDismiss={() => dismissAgent(agent.id)}
                           />
@@ -694,20 +729,22 @@ export default function App(): React.JSX.Element {
                       )}
                     </article>
                   ))}
-                  {agents.length === 0 && dismissed && (
+                  {agents.length === 0 && lastDismissed && (
                     <div className="empty-agents">
                       <p className="kicker">NO AGENTS KEPT</p>
                       <h2>Your proposed team is empty.</h2>
-                      <p>Undo the last dismissal to keep shaping this setup.</p>
+                      <p>
+                        Restore your last dismissed Agent, then undo earlier dismissals if needed.
+                      </p>
                       <button className="secondary-button" onClick={undoDismiss}>
-                        Restore {dismissed.agent.name}
+                        Restore {lastDismissed.agent.name}
                       </button>
                     </div>
                   )}
                 </div>
-                {dismissed && (
+                {lastDismissed && (
                   <div className="undo-bar" role="status">
-                    <span>{dismissed.agent.name} dismissed.</span>
+                    <span>{lastDismissed.agent.name} dismissed.</span>
                     <button ref={undoButton} disabled={Boolean(busyMessage)} onClick={undoDismiss}>
                       Undo
                     </button>
@@ -737,7 +774,7 @@ export default function App(): React.JSX.Element {
                     disabled={agents.length === 0 || Boolean(busyMessage)}
                     onClick={() => void prepareCreation()}
                   >
-                    Review {agents.length} Agent{agents.length === 1 ? '' : 's'}
+                    Review folders
                   </button>
                 </footer>
               </>

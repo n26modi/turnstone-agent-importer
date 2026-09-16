@@ -4,12 +4,14 @@ export default function AgentActions({
   name,
   disabled,
   canMerge,
+  onRename,
   onMerge,
   onDismiss,
 }: {
   name: string
   disabled: boolean
   canMerge: boolean
+  onRename: (trigger: HTMLButtonElement) => void
   onMerge: () => void
   onDismiss: () => void
 }): React.JSX.Element {
@@ -77,6 +79,17 @@ export default function AgentActions({
       </button>
       {open && (
         <div id={menuId} role="menu" aria-label={`Actions for ${name}`} className="overflow-menu">
+          <button
+            role="menuitem"
+            tabIndex={-1}
+            disabled={disabled}
+            onClick={() => {
+              setOpen(false)
+              if (trigger.current) onRename(trigger.current)
+            }}
+          >
+            Rename
+          </button>
           <button
             role="menuitem"
             tabIndex={-1}

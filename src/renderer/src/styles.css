@@ -168,7 +168,8 @@ button:disabled {
 }
 
 .canvas--suggestions {
-  overflow: auto;
+  /* The document owns review scrolling; avoid a second canvas scrollbar. */
+  overflow: visible;
   background: #f2eee9;
 }
 
@@ -584,8 +585,22 @@ h1 span {
   border-bottom-color: #aaa69f;
 }
 
+.rename-help {
+  margin: 6px 0 0;
+  color: #6c6962;
+  font-size: 11px;
+}
+
+.agent-purpose-label {
+  margin: 18px 0 0;
+  color: #65655f;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .agent-purpose {
-  margin: 10px 0 0;
+  margin: 6px 0 0;
   color: #5d5a54;
   font-size: 13px;
   line-height: 1.55;

@@ -109,6 +109,12 @@ const manifest = {
   ],
 }
 
+async function beginRename(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(screen.getByRole('button', { name: `More actions for ${name}` }))
+  await user.click(screen.getByRole('menuitem', { name: 'Rename' }))
+  return screen.getByRole('textbox', { name: `Rename ${name}` })
+}
+
 describe('App discovery and analysis flow', () => {
   afterEach(cleanup)
 
@@ -154,6 +160,8 @@ describe('App discovery and analysis flow', () => {
     expect(await screen.findByText('YOUR PROPOSED TEAM')).toBeInTheDocument()
     expect(window.turnstone.analyzeHistories).toHaveBeenCalledWith('automatic')
     expect(screen.getByRole('heading', { name: 'Importer Agent' })).toBeInTheDocument()
+    expect(screen.getByText('Can help with')).toBeInTheDocument()
+    expect(screen.getByText('Keep the importer product context and decisions.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Brain preview' })).toBeInTheDocument()
   })
 
@@ -210,10 +218,16 @@ describe('App discovery and analysis flow', () => {
     await user.click(await screen.findByRole('button', { name: 'Continue' }))
     await user.click(screen.getByRole('button', { name: /Let me review/ }))
 
-    const name = await screen.findByRole('textbox', { name: 'Rename Importer Agent' })
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    const name = await beginRename(user, 'Importer Agent')
+    expect(name).toHaveFocus()
     await user.clear(name)
     await user.type(name, 'Trusted Import Agent{Enter}')
-    expect(screen.getByRole('button', { name: 'Review 1 Agent' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Review folders' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Trusted Import Agent' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'More actions for Trusted Import Agent' }),
+    ).toHaveFocus()
 
     await user.click(screen.getByRole('button', { name: 'Evidence' }))
     expect(screen.getByRole('dialog', { name: 'Agent evidence' })).toBeInTheDocument()
@@ -224,7 +238,7 @@ describe('App discovery and analysis flow', () => {
     await user.click(screen.getByRole('menuitem', { name: 'Dismiss' }))
     expect(screen.getByText('Trusted Import Agent dismissed.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Undo' }))
-    expect(screen.getByRole('textbox', { name: 'Rename Trusted Import Agent' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Trusted Import Agent' })).toHaveFocus()
   })
 
   it('closes an inspector with Escape', async () => {
@@ -284,23 +298,132 @@ describe('App discovery and analysis flow', () => {
     await user.click(screen.getByRole('button', { name: 'Try with sample data' }))
     await user.click(await screen.findByRole('button', { name: 'Continue' }))
     await user.click(screen.getByRole('button', { name: /Let me review/ }))
-    const name = screen.getByRole('textbox', { name: 'Rename Importer Agent' })
+    let name = await beginRename(user, 'Importer Agent')
     await user.clear(name)
     await user.keyboard('{Enter}')
-    expect(name).toHaveValue('Importer Agent')
+    expect(screen.getByRole('heading', { name: 'Importer Agent' })).toBeInTheDocument()
+    name = await beginRename(user, 'Importer Agent')
     await user.clear(name)
     await user.type(name, 'Cost $& Agent{Enter}')
     await user.click(screen.getByRole('button', { name: 'Brain preview' }))
-    expect(screen.getAllByRole('heading', { name: 'Cost $& Agent' })).toHaveLength(2)
+    expect(
+      within(screen.getByRole('dialog')).getAllByRole('heading', { name: 'Cost $& Agent' }),
+    ).toHaveLength(2)
     await user.keyboard('{Escape}')
     const more = screen.getByRole('button', { name: 'More actions for Cost $& Agent' })
     more.focus()
     await user.keyboard('{ArrowDown}')
+    expect(screen.getByRole('menuitem', { name: 'Rename' })).toHaveFocus()
+    await user.keyboard('{ArrowDown}')
     expect(screen.getByRole('menuitem', { name: 'Dismiss' })).toHaveFocus()
     expect(screen.getByRole('menuitem', { name: 'Merge with another Agent' })).toBeDisabled()
+    await user.keyboard('{Home}')
+    expect(screen.getByRole('menuitem', { name: 'Rename' })).toHaveFocus()
+    await user.keyboard('{End}')
+    expect(screen.getByRole('menuitem', { name: 'Dismiss' })).toHaveFocus()
     await user.keyboard('{Escape}')
     expect(more).toHaveFocus()
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+  })
+
+  it('keeps a long name as a heading and lets an explicit rename be cancelled or saved on blur', async () => {
+    const user = userEvent.setup()
+    const longName =
+      'AquaShield Hydraulic Simulation and Reproducible Leak Detection Benchmark Agent'
+    vi.mocked(window.turnstone.analyzeHistories).mockResolvedValueOnce({
+      ...analyzed,
+      setupStyle: 'review',
+      agents: [{ ...analyzed.agents[0]!, name: longName }],
+    })
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Try with sample data' }))
+    await user.click(await screen.findByRole('button', { name: 'Continue' }))
+    await user.click(screen.getByRole('button', { name: /Let me review/ }))
+    expect(screen.getByRole('heading', { name: longName })).toBeInTheDocument()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+
+    const name = await beginRename(user, longName)
+    await user.clear(name)
+    await user.type(name, 'Unwanted name{Escape}')
+    expect(screen.getByRole('heading', { name: longName })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: `More actions for ${longName}` })).toHaveFocus()
+
+    const newName = await beginRename(user, longName)
+    await user.clear(newName)
+    await user.type(newName, 'Simulation Agent')
+    await user.tab()
+    expect(screen.getByRole('heading', { name: 'Simulation Agent' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Review folders' }))
+    expect(window.turnstone.planCreation).toHaveBeenLastCalledWith([
+      expect.objectContaining({ name: 'Simulation Agent' }),
+    ])
+  })
+
+  it('restores every dismissal in order, including after the proposed team is empty', async () => {
+    const user = userEvent.setup()
+    const agents = ['First Agent', 'Second Agent', 'Third Agent'].map((name, index) => ({
+      ...analyzed.agents[0]!,
+      id: `agent-${index + 1}`,
+      name,
+    }))
+    vi.mocked(window.turnstone.analyzeHistories).mockResolvedValueOnce({
+      ...analyzed,
+      setupStyle: 'review',
+      agents,
+    })
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Try with sample data' }))
+    await user.click(await screen.findByRole('button', { name: 'Continue' }))
+    await user.click(screen.getByRole('button', { name: /Let me review/ }))
+    for (const agent of agents) {
+      await user.click(screen.getByRole('button', { name: `More actions for ${agent.name}` }))
+      await user.click(screen.getByRole('menuitem', { name: 'Dismiss' }))
+      expect(screen.getByRole('button', { name: 'Undo' })).toHaveFocus()
+    }
+    expect(
+      screen.getByRole('heading', { name: 'Your proposed team is empty.' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Review folders' })).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: 'Restore Third Agent' }))
+    expect(screen.getByRole('button', { name: 'Undo' })).toHaveFocus()
+    await user.keyboard('{Enter}')
+    expect(screen.getByRole('heading', { name: 'Second Agent' })).toBeInTheDocument()
+    await user.keyboard('{Enter}')
+    expect(
+      screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent),
+    ).toEqual(agents.map((agent) => agent.name))
+    expect(screen.getByRole('heading', { name: 'First Agent' })).toHaveFocus()
+    expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Review folders' })).toBeEnabled()
+  })
+
+  it('keeps dismissed Agents recoverable after merging the remaining team', async () => {
+    const user = userEvent.setup()
+    const first = analyzed.agents[0]!
+    const second = { ...first, id: 'agent-2', name: 'Second Agent' }
+    const third = { ...first, id: 'agent-3', name: 'Third Agent' }
+    vi.mocked(window.turnstone.analyzeHistories).mockResolvedValueOnce({
+      ...analyzed,
+      setupStyle: 'review',
+      agents: [first, second, third],
+    })
+    vi.mocked(window.turnstone.mergeAgents).mockResolvedValueOnce({
+      agent: { ...first, id: 'combined', name: 'Combined Agent' },
+      mode: 'deterministic',
+    })
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: 'Try with sample data' }))
+    await user.click(await screen.findByRole('button', { name: 'Continue' }))
+    await user.click(screen.getByRole('button', { name: /Let me review/ }))
+    await user.click(screen.getByRole('button', { name: 'More actions for Third Agent' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Dismiss' }))
+    await user.click(screen.getByRole('button', { name: 'More actions for Importer Agent' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Merge with another Agent' }))
+    await user.click(screen.getByRole('button', { name: 'Combine' }))
+    await user.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(screen.getByRole('heading', { name: 'Combined Agent' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Third Agent' })).toHaveFocus()
   })
 
   it('keeps Agent edits disabled during a merge and announces the result', async () => {
@@ -325,7 +448,7 @@ describe('App discovery and analysis flow', () => {
     await user.click(screen.getByRole('button', { name: 'More actions for Importer Agent' }))
     await user.click(screen.getByRole('menuitem', { name: 'Merge with another Agent' }))
     await user.click(screen.getByRole('button', { name: 'Combine' }))
-    expect(screen.getByRole('textbox', { name: 'Rename Second Agent' })).toBeDisabled()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'More actions for Second Agent' })).toBeDisabled()
     await act(async () =>
       finishMerge({
@@ -333,7 +456,7 @@ describe('App discovery and analysis flow', () => {
         mode: 'deterministic',
       }),
     )
-    expect(screen.getByRole('textbox', { name: 'Rename Combined Agent' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'More actions for Combined Agent' })).toBeEnabled()
     expect(screen.getByText(/Importer Agent and Second Agent merged/)).toBeInTheDocument()
   })
 
@@ -343,7 +466,7 @@ describe('App discovery and analysis flow', () => {
     await user.click(screen.getByRole('button', { name: 'Try with sample data' }))
     await user.click(await screen.findByRole('button', { name: 'Continue' }))
     await user.click(screen.getByRole('button', { name: /Set it up for me/ }))
-    await user.click(await screen.findByRole('button', { name: 'Review 1 Agent' }))
+    await user.click(await screen.findByRole('button', { name: 'Review folders' }))
     vi.mocked(window.turnstone.chooseDestination).mockRejectedValueOnce(
       new Error('picker unavailable'),
     )
@@ -363,7 +486,7 @@ describe('App discovery and analysis flow', () => {
     await user.click(screen.getByRole('button', { name: 'Import from this Mac' }))
     await user.click(await screen.findByRole('button', { name: 'Continue' }))
     await user.click(screen.getByRole('button', { name: /Set it up for me/ }))
-    await user.click(await screen.findByRole('button', { name: 'Review 1 Agent' }))
+    await user.click(await screen.findByRole('button', { name: 'Review folders' }))
 
     expect(await screen.findByText('READY TO CREATE')).toBeInTheDocument()
     expect(screen.getByText('/example/Turnstone/Agents')).toBeInTheDocument()
@@ -396,7 +519,7 @@ describe('App discovery and analysis flow', () => {
     await user.click(screen.getByRole('button', { name: 'Import from this Mac' }))
     await user.click(await screen.findByRole('button', { name: 'Continue' }))
     await user.click(screen.getByRole('button', { name: /Set it up for me/ }))
-    await user.click(await screen.findByRole('button', { name: 'Review 1 Agent' }))
+    await user.click(await screen.findByRole('button', { name: 'Review folders' }))
     await user.click(await screen.findByRole('button', { name: 'Create Agent folders' }))
 
     expect(await screen.findByText('No folders were created')).toBeInTheDocument()
@@ -453,7 +576,7 @@ describe('App discovery and analysis flow', () => {
     await user.click(screen.getByRole('button', { name: 'Try with sample data' }))
     await user.click(await screen.findByRole('button', { name: 'Continue' }))
     await user.click(screen.getByRole('button', { name: /Set it up for me/ }))
-    await user.click(screen.getByRole('button', { name: 'Review 2 Agents' }))
+    await user.click(screen.getByRole('button', { name: 'Review folders' }))
     await user.click(screen.getByRole('button', { name: 'Create Agent folders' }))
     await user.click(screen.getByRole('button', { name: 'Review folder plan' }))
     expect(window.turnstone.planCreation).toHaveBeenLastCalledWith([second])

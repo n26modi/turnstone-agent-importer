@@ -14,42 +14,78 @@ const samples: SampleConversation[] = [
   {
     id: 'sample-turnstone-discovery',
     provider: 'claude-code',
-    project: 'turnstone-agent-importer',
+    project: 'Turnstone Onboarding',
     title: 'Design a trustworthy local import flow',
     date: '2026-09-08T14:00:00.000Z',
-    user: 'Design a macOS onboarding flow that scans Claude Code and Codex only after an explicit click. Prefer calm editorial UI and visible evidence.',
-    assistant:
-      'The importer should keep filesystem access in Electron main, expose narrow typed IPC, and show source-level diagnostics without overwhelming the user.',
+    user: [
+      'Design an onboarding flow that turns local coding histories into a useful team of Agents.',
+      'Keep the import effortless while letting people inspect evidence before creating Brain files.',
+      'I prefer explicit consent before scanning and a calm, editorial interface.',
+      'We decided to keep filesystem access in Electron main and expose only a narrow IPC bridge.',
+      'How should onboarding explain a partially readable history?',
+    ].join(' '),
+    assistant: [
+      'Turnstone uses Electron, React, and TypeScript for macOS-first onboarding.',
+      'The import workflow checks Claude Code and Codex separately and preserves readable conversations.',
+      'Review source counts before analysis, then inspect proposed Agents and their evidence before writing Brain files.',
+    ].join(' '),
   },
   {
     id: 'sample-turnstone-brains',
     provider: 'codex',
-    project: 'turnstone-agent-importer',
+    project: 'Turnstone Onboarding',
     title: 'Define evidence-backed Agent Brains',
     date: '2026-09-10T16:00:00.000Z',
-    user: 'Create five concise Brain files with provenance. Do not dump transcripts, invent facts, or silently overwrite existing Agent folders.',
-    assistant:
-      'Use README, context, patterns, key decisions, and open questions. Significant claims should cite the source conversation ID.',
+    user: [
+      'Prepare focused Brain files that let an Agent pick up a project without rereading the original conversations.',
+      'Connect significant claims to their source evidence and separate unresolved questions from settled decisions.',
+      'I prefer concise Markdown over transcript dumps.',
+      'We decided that existing Agent folders must never be overwritten; show a suffixed name before creation.',
+      'How much source context should the Brain preview show alongside each citation?',
+    ].join(' '),
+    assistant: [
+      'Each Agent has five Brain files: README.md, context.md, patterns.md, key-decisions.md, and open-questions.md.',
+      'The Brain review workflow follows a claim to its source evidence before keeping it.',
+      'Use the folder manifest to confirm the destination, Agent names, and all five files before creation.',
+    ].join(' '),
   },
   {
     id: 'sample-aquashield-model',
     provider: 'claude-code',
-    project: 'aquashield-hydraulic-model',
+    project: 'AquaShield Simulation',
     title: 'Generate reproducible hydraulic sensor data',
     date: '2026-08-22T11:30:00.000Z',
-    user: 'Build a reproducible pipeline for synthetic pressure and flow readings with leak scenarios. Keep units explicit and validate generated datasets.',
-    assistant:
-      'Separate network construction, demand profiles, leak injection, simulation, and storage. Seed randomness and test unit conversions.',
+    user: [
+      'Generate reproducible pressure and flow datasets for testing water-network leak detection.',
+      'Compare normal demand with leak scenarios and flag invalid simulation results before exporting a dataset.',
+      'I prefer explicit units and a saved configuration for every simulation.',
+      'We decided to seed randomness so leak simulations can be repeated exactly.',
+      'Which leak sizes and sensor locations should the first benchmark cover?',
+    ].join(' '),
+    assistant: [
+      'AquaShield is a hydraulic simulation project that generates synthetic pressure and flow readings.',
+      'The simulation pipeline separates network construction, demand profiles, leak injection, and dataset storage.',
+      'Validate pressure and flow units before each simulation, then save its seed and configuration with the dataset.',
+    ].join(' '),
   },
   {
     id: 'sample-research-workflow',
     provider: 'codex',
-    project: 'multi-agent-memory-eval',
+    project: 'Memory Research',
     title: 'Evaluate multi-agent memory quality',
     date: '2026-09-02T09:15:00.000Z',
-    user: 'Compare memory backends on retrieval quality, temporal invalidation, and stale facts. I want evidence-backed conclusions and reproducible charts.',
-    assistant:
-      'Use a fixed query set, separate researcher and critic roles, track stale-memory failures, and preserve raw evaluation results for auditability.',
+    user: [
+      'Evaluate memory backends for retrieval quality and their ability to retire stale facts.',
+      'Turn memory evaluation results into evidence-backed comparisons and reproducible charts.',
+      'I prefer inspecting raw retrieval results before trusting an aggregate score.',
+      'We decided to use a fixed query set and separate researcher and critic roles for memory evaluation.',
+      'How should the benchmark weight stale answers against missing answers?',
+    ].join(' '),
+    assistant: [
+      'The memory benchmark uses retrieval quality, temporal invalidation, and stale-fact failures as evaluation dimensions.',
+      'The evaluation workflow runs the same queries against every memory backend and preserves raw retrieval results.',
+      'Compare retrieval scores with stale-memory failures, then review disagreements before publishing charts.',
+    ].join(' '),
   },
 ]
 
@@ -60,7 +96,7 @@ function conversation(sample: SampleConversation): NormalizedConversation {
     provider: sample.provider,
     title: sample.title,
     project: sample.project,
-    cwd: `/sample/${sample.project}`,
+    cwd: `/sample/${sample.project.toLowerCase().replace(/\s+/g, '-')}`,
     sourcePath: `sample://${sample.id}`,
     startedAt: sample.date,
     updatedAt,

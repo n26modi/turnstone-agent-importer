@@ -8,14 +8,14 @@ A macOS-first Electron onboarding experience that turns local Claude Code and Co
 
 ## Why this exists
 
-People already teach coding agents how they work across dozens of conversations. This prototype finds that existing context, identifies coherent projects and recurring workflows, and proposes a small team of specialized Agents. The experience is designed around trust: scanning starts only after an explicit click, every suggestion includes source evidence, every Brain can be inspected, and no folder is written without a final manifest.
+People already teach coding agents how they work across dozens of conversations. This prototype finds that existing context, identifies coherent projects and recurring workflows, and proposes a small team of specialized Agents. Each card explains the concrete work its Agent can help with. The experience is designed around trust: scanning starts only after an explicit click, every suggestion includes source evidence, every Brain can be inspected, and no folder is written without a final manifest.
 
 ## Experience
 
 1. **Import from this Mac.** Discover local Claude Code and Codex histories, or use bundled sample data.
 2. **Choose a setup style.** Let Turnstone prepare the strongest team automatically, or review and shape it collaboratively.
 3. **Analyze.** Clean and bound excerpts locally, summarize conversations, cluster related work, and synthesize five-file Brains.
-4. **Review.** Open the primary Brain preview, follow source citations, and inspect all five files. In collaborative mode, rename inline or use the **•••** menu to merge or dismiss suggestions, with undo.
+4. **Review.** Open the primary Brain preview, follow source citations, and inspect all five files. In collaborative mode, use the **•••** menu to rename, merge, or dismiss suggestions. Names wrap for easy reading; Rename opens a focused inline editor. Undo can restore every dismissed Agent, one at a time.
 5. **Confirm and create.** Review exact destinations, collision-safe folder names, and file manifests before writing.
 
 Each created Agent contains:
@@ -46,6 +46,8 @@ npm run dev
 ```
 
 The default model is `gpt-5.5`. Override it with `TURNSTONE_OPENAI_MODEL`.
+
+The bundled synthetic conversations demonstrate three project Agents: Turnstone Onboarding, AquaShield Simulation, and Memory Research. They pass through the same conservative local pipeline as recovery flows. Draft responsibilities, context, workflows, decisions, and open questions are extracted from source sentences with inline citations; this is not a prerecorded OpenAI result.
 
 To review the compiled app, run `npm run build` followed by `npm run preview`. The build produces Electron main, preload, and renderer assets in `out/`; it does not produce a signed installer.
 
